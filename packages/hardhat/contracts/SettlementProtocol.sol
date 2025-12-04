@@ -138,6 +138,7 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
     // Protocol state
     bool public paused;
     address public admin;
+    bool private locked;  // Reentrancy guard
 
     // ============================================
     // EVENTS
@@ -199,27 +200,62 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         uint256 amount
     );
 
+    event MEVPreventionEnforced(
+        uint256 indexed settlementId,
+        string reason
+    );
+
+    event TimeoutRefundTriggered(
+        uint256 indexed settlementId,
+        uint256 refundAmount,
+        uint256 atBlock
+    );
+
+    event DisputeResolved(
+        uint256 indexed settlementId,
+        uint256 correctPrice,
+        uint256 atBlock
+    );
+
+    event SettlementQueued(
+        uint256 indexed settlementId,
+        uint256 queuePosition,
+        uint256 atBlock
+    );
+
     // ============================================
     // MODIFIERS
     // ============================================
 
     modifier onlyAdmin() {
-        require(msg.sender == admin, "Only admin");
+        require(msg.sender == admin, "!admin");
         _;
     }
 
     modifier notPaused() {
-        require(!paused, "Protocol paused");
+        require(!paused, "paused");
         _;
     }
 
     modifier validSettlement(uint256 settlementId) {
-        require(settlementId < nextSettlementId, "Settlement does not exist");
+        require(settlementId < nextSettlementId, "!exist");
         _;
     }
 
     modifier inState(uint256 settlementId, SettlementState expectedState) {
-        require(settlements[settlementId].state == expectedState, "Invalid state");
+        require(settlements[settlementId].state == expectedState, "!state");
+        _;
+    }
+
+    modifier nonReentrant() {
+        require(!locked, "reentry");
+        locked = true;
+        _;
+        locked = false;
+    }
+
+    modifier whenNotPaused() {
+        require(!paused, "paused");
         _;
     }
 
@@ -249,8 +285,8 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         Transfer[] memory transfers,
         uint256 timeout
     ) external notPaused returns (uint256 settlementId) {
-        require(transfers.length > 0, "No transfers");
-        require(transfers.length <= 100, "Too many transfers");
+        require(transfers.length > 0, "empty");
+        require(transfers.length <= 100, ">100");
         
         settlementId = nextSettlementId++;
         
@@ -264,7 +300,7 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         ));
         
         // INVARIANT CHECK: No duplicate settlement hashes (reorg protection)
-        require(!usedSettlementHashes[settlementHash], "Duplicate settlement hash");
+        require(!usedSettlementHashes[settlementHash], "dup hash");
         usedSettlementHashes[settlementHash] = true;
         
         // Add to FIFO queue (fair ordering)
@@ -283,8 +319,8 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         
         // Copy transfers
         for (uint256 i = 0; i < transfers.length; i++) {
-            require(transfers[i].to != address(0), "Invalid recipient");
-            require(transfers[i].amount > 0, "Zero amount");
+            require(transfers[i].to != address(0), "0x");
+            require(transfers[i].amount > 0, "0val");
             s.transfers.push(Transfer({
                 from: transfers[i].from,
                 to: transfers[i].to,
@@ -294,6 +330,7 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         }
         
         emit SettlementCreated(settlementId, msg.sender, queuePosition, settlementHash);
+        emit SettlementQueued(settlementId, queuePosition, block.number);
     }
 
     /**
@@ -308,7 +345,7 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         validSettlement(settlementId)
         inState(settlementId, SettlementState.PENDING)
     {
-        require(msg.value > 0, "Zero deposit");
+        require(msg.value > 0, "0");
         
         Settlement storage s = settlements[settlementId];
         
@@ -336,20 +373,23 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
     {
         Settlement storage s = settlements[settlementId];
         
-        // FAIR ORDERING: Must be next in queue
-        require(settlementQueue[queueHead] == settlementId, "Not next in queue");
+        // FAIR ORDERING: Must be next in queue (MEV prevention)
+        if (settlementQueue[queueHead] != settlementId) {
+            emit MEVPreventionEnforced(settlementId, "blocked");
+            revert("!queue");
+        }
         
         // Calculate required amount
         uint256 requiredAmount = _calculateTotalRequired(settlementId);
         
         // INVARIANT CHECK 1: Sufficient deposits (Conservation of Value)
-        require(s.totalDeposited >= requiredAmount, "Insufficient deposits");
+        require(s.totalDeposited >= requiredAmount, "!funds");
         
         // Fetch oracle price
         (uint256 price, uint256 timestamp) = getLatestPrice();
         
         // INVARIANT CHECK 3: Oracle data freshness
-        require(block.timestamp - timestamp <= MAX_ORACLE_STALENESS, "Oracle data stale");
+        require(block.timestamp - timestamp <= MAX_ORACLE_STALENESS, "stale");
         
         // Store oracle data
         s.oraclePrice = price;
@@ -361,6 +401,7 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         queueHead++;
         
         emit SettlementInitiated(settlementId, price, timestamp);
+        emit SettlementQueued(settlementId, s.queuePosition, block.number);
     }
 
     /**
@@ -388,7 +429,7 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         );
         
         // INVARIANT CHECK 2: No double settlement
-        require(s.executedTransfers < s.transfers.length, "Already fully executed");
+        require(s.executedTransfers < s.transfers.length, "done");
         
         // Check minimum confirmations (reorg safety)
         require(
@@ -411,7 +452,7 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
             if (!t.executed) {
                 // Execute transfer
                 (bool success, ) = t.to.call{value: t.amount}("");
-                require(success, "Transfer failed");
+                require(success, "!xfer");
                 
                 t.executed = true;
                 s.executedTransfers++;
@@ -505,25 +546,25 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         bool isFailed = s.state == SettlementState.FAILED;
         bool isPending = s.state == SettlementState.PENDING && isExpired;
         
-        require(isExpired || isFailed || isPending, "Cannot refund yet");
+        require(isExpired || isFailed || isPending, "!refund");
         
         // Mark as failed if not already
         if (s.state != SettlementState.FAILED) {
             s.state = SettlementState.FAILED;
-            emit SettlementFailed(settlementId, "Timeout - auto refund");
+            emit SettlementFailed(settlementId, "timeout");
         }
         
         // Refund caller's deposit
         UserDeposit storage ud = userDeposits[msg.sender][settlementId];
-        require(ud.amount > 0, "No deposit to refund");
-        require(ud.locked, "Already refunded");
+        require(ud.amount > 0, "!deposit");
+        require(ud.locked, "refunded");
         
         uint256 refundAmount = ud.amount;
         ud.amount = 0;
         ud.locked = false;
         
         (bool success, ) = msg.sender.call{value: refundAmount}("");
-        require(success, "Refund failed");
+        require(success, "!send");
         
         emit RefundIssued(msg.sender, settlementId, refundAmount);
     }
@@ -661,8 +702,388 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
     }
 
     function setAdmin(address newAdmin) external onlyAdmin {
-        require(newAdmin != address(0), "Invalid admin");
+        require(newAdmin != address(0), "0x");
         admin = newAdmin;
+    }
+
+    // ============================================
+    // BATCH 4: ENHANCED FAIR ORDERING & EXECUTION
+    // ============================================
+
+    /**
+     * @notice Get the settlement queue with position details
+     * @return queueIds Array of settlement IDs in queue order
+     * @return currentHead Current queue head position
+     * @return currentTail Current queue tail position
+     */
+    function getSettlementQueue() 
+        external 
+        view 
+        returns (
+            uint256[] memory queueIds,
+            uint256 currentHead,
+            uint256 currentTail
+        ) 
+    {
+        uint256 length = queueTail - queueHead;
+        queueIds = new uint256[](length);
+        
+        for (uint256 i = 0; i < length; i++) {
+            queueIds[i] = settlementQueue[queueHead + i];
+        }
+        
+        return (queueIds, queueHead, queueTail);
+    }
+
+    /**
+     * @notice Get queue position for a specific settlement
+     * @param settlementId The settlement to check
+     * @return position The position in queue (0 if at front)
+     * @return isInQueue Whether the settlement is in the queue
+     */
+    function getQueuePosition(uint256 settlementId) 
+        external 
+        view 
+        returns (uint256 position, bool isInQueue) 
+    {
+        if (settlementId >= nextSettlementId) {
+            return (0, false);
+        }
+        
+        Settlement storage s = settlements[settlementId];
+        if (s.state != SettlementState.PENDING && s.state != SettlementState.INITIATED) {
+            return (0, false);
+        }
+        
+        // Search queue for this settlement
+        for (uint256 i = queueHead; i < queueTail; i++) {
+            if (settlementQueue[i] == settlementId) {
+                return (i - queueHead, true);
+            }
+        }
+        
+        return (0, false);
+    }
+
+    /**
+     * @notice Check if a settlement is eligible for timeout refund
+     * @param settlementId The settlement to check
+     * @return eligible Whether the settlement can be refunded
+     * @return blocksRemaining Blocks until timeout (0 if already timed out)
+     */
+    function isEligibleForRefund(uint256 settlementId) 
+        external 
+        view 
+        returns (bool eligible, uint256 blocksRemaining) 
+    {
+        if (settlementId >= nextSettlementId) {
+            return (false, 0);
+        }
+        
+        Settlement storage s = settlements[settlementId];
+        
+        // Can only refund PENDING, INITIATED, or EXECUTING states
+        if (s.state == SettlementState.FINALIZED ||
+            s.state == SettlementState.FAILED ||
+            s.state == SettlementState.DISPUTED) {
+            return (false, 0);
+        }
+        
+        uint256 timeoutBlock = s.createdBlock + s.timeout;
+        if (block.number < timeoutBlock) {
+            return (false, timeoutBlock - block.number);
+        }
+        
+        return (s.totalDeposited > 0, 0);
+    }
+
+    /**
+     * @notice Get comprehensive settlement details with status
+     * @param settlementId The settlement to query
+     */
+    function getSettlementDetails(uint256 settlementId) 
+        external 
+        view 
+        returns (
+            // Core info
+            address initiator,
+            SettlementState state,
+            uint256 createdBlock,
+            uint256 oraclePrice,
+            uint256 timeout,
+            // Execution info
+            uint256 executedTransfers,
+            uint256 totalTransfers,
+            uint256 totalDeposited,
+            // Queue info
+            uint256 queuePosition,
+            bool isNextInQueue,
+            // Timing info
+            bool isTimedOut,
+            uint256 blocksUntilTimeout
+        ) 
+    {
+        require(settlementId < nextSettlementId, "Settlement does not exist");
+        
+        Settlement storage s = settlements[settlementId];
+        
+        initiator = s.initiator;
+        state = s.state;
+        createdBlock = s.createdBlock;
+        oraclePrice = s.oraclePrice;
+        timeout = s.timeout;
+        executedTransfers = s.executedTransfers;
+        totalTransfers = s.transfers.length;
+        totalDeposited = s.totalDeposited;
+        queuePosition = s.queuePosition;
+        isNextInQueue = (settlementQueue[queueHead] == settlementId);
+        
+        uint256 timeoutBlock = s.createdBlock + s.timeout;
+        isTimedOut = (block.number >= timeoutBlock);
+        blocksUntilTimeout = isTimedOut ? 0 : (timeoutBlock - block.number);
+    }
+
+    /**
+     * @notice Get full status including invariant checks
+     * @param settlementId The settlement to query
+     */
+    function getFullStatus(uint256 settlementId) 
+        external 
+        view 
+        returns (
+            SettlementState state,
+            bool invariantsHold,
+            bool canProceed
+        ) 
+    {
+        require(settlementId < nextSettlementId, "Settlement does not exist");
+        
+        Settlement storage s = settlements[settlementId];
+        state = s.state;
+        
+        // Check invariants
+        (invariantsHold, ) = verifyAllInvariants(settlementId);
+        
+        // Determine if settlement can proceed
+        if (state == SettlementState.PENDING) {
+            uint256 required = _calculateTotalRequired(settlementId);
+            canProceed = (s.totalDeposited >= required) && 
+                         (settlementQueue[queueHead] == settlementId);
+        } else if (state == SettlementState.INITIATED) {
+            canProceed = true;
+        } else if (state == SettlementState.EXECUTING) {
+            canProceed = (s.executedTransfers < s.transfers.length);
+        } else {
+            canProceed = false;
+        }
+    }
+
+    /**
+     * @notice Batch refund multiple timed-out settlements
+     * @param settlementIds Array of settlement IDs to refund
+     * @return refunded Number of settlements successfully refunded
+     * @return totalRefundAmount Total amount refunded across all settlements
+     */
+    function batchRefundTimeouts(uint256[] calldata settlementIds) 
+        external 
+        nonReentrant 
+        whenNotPaused
+        returns (uint256 refunded, uint256 totalRefundAmount) 
+    {
+        for (uint256 i = 0; i < settlementIds.length; i++) {
+            uint256 settlementId = settlementIds[i];
+            
+            if (settlementId >= nextSettlementId) continue;
+            
+            Settlement storage s = settlements[settlementId];
+            
+            // Skip if not in refundable state
+            if (s.state == SettlementState.FINALIZED || 
+                s.state == SettlementState.FAILED ||
+                s.state == SettlementState.DISPUTED) {
+                continue;
+            }
+            
+            // Skip if not timed out
+            if (block.number < s.createdBlock + s.timeout) {
+                continue;
+            }
+            
+            // Skip if no deposits
+            if (s.totalDeposited == 0) {
+                continue;
+            }
+            
+            // Process refunds for all depositors
+            for (uint256 j = 0; j < s.transfers.length; j++) {
+                address from = s.transfers[j].from;
+                UserDeposit storage ud = userDeposits[from][settlementId];
+                
+                if (ud.amount > 0 && ud.locked) {
+                    uint256 refundAmount = ud.amount;
+                    ud.amount = 0;
+                    ud.locked = false;
+                    
+                    (bool success, ) = from.call{value: refundAmount}("");
+                    if (success) {
+                        totalRefundAmount += refundAmount;
+                        emit RefundIssued(from, settlementId, refundAmount);
+                    }
+                }
+            }
+            
+            s.state = SettlementState.FAILED;
+            emit TimeoutRefundTriggered(settlementId, s.totalDeposited, block.number);
+            refunded++;
+        }
+        
+        return (refunded, totalRefundAmount);
+    }
+
+    /**
+     * @notice Batch check invariants for multiple settlements
+     * @param settlementIds Array of settlement IDs to check
+     * @return results Array of booleans indicating invariant status
+     * @return allHold Whether all invariants hold for all settlements
+     */
+    function batchCheckInvariants(uint256[] calldata settlementIds) 
+        external 
+        view 
+        returns (bool[] memory results, bool allHold) 
+    {
+        results = new bool[](settlementIds.length);
+        allHold = true;
+        
+        for (uint256 i = 0; i < settlementIds.length; i++) {
+            if (settlementIds[i] < nextSettlementId) {
+                (results[i], ) = verifyAllInvariants(settlementIds[i]);
+                if (!results[i]) {
+                    allHold = false;
+                }
+            } else {
+                results[i] = false;
+                allHold = false;
+            }
+        }
+        
+        return (results, allHold);
+    }
+
+    /**
+     * @notice Get protocol statistics (simplified for efficiency)
+     * @return totalSettlements Total number of settlements created
+     * @return currentQueueLength Current queue length
+     * @return queueHeadPos Current queue head position
+     * @return queueTailPos Current queue tail position
+     */
+    function getProtocolStats() 
+        external 
+        view 
+        returns (
+            uint256 totalSettlements,
+            uint256 currentQueueLength,
+            uint256 queueHeadPos,
+            uint256 queueTailPos
+        ) 
+    {
+        totalSettlements = nextSettlementId;
+        currentQueueLength = queueTail - queueHead;
+        queueHeadPos = queueHead;
+        queueTailPos = queueTail;
+    }
+
+    // ============================================
+    // EMERGENCY FUNCTIONS
+    // ============================================
+
+    /**
+     * @notice Emergency pause with reason logging
+     * @param reason The reason for emergency pause
+     */
+    function emergencyPause(string calldata reason) external onlyAdmin {
+        paused = true;
+        emit MEVPreventionEnforced(0, reason);
+    }
+
+    /**
+     * @notice Emergency pause a specific settlement
+     * @param settlementId The settlement to pause
+     * @param reason The reason for pausing
+     */
+    function emergencyPauseSettlement(uint256 settlementId, string calldata reason) 
+        external 
+        onlyAdmin 
+    {
+        require(settlementId < nextSettlementId, "Settlement does not exist");
+        
+        Settlement storage s = settlements[settlementId];
+        require(s.state != SettlementState.FINALIZED, "Already finalized");
+        require(s.state != SettlementState.FAILED, "Already failed");
+        
+        // Mark as disputed for admin intervention
+        s.state = SettlementState.DISPUTED;
+        s.disputeReason = reason;
+        
+        emit SettlementDisputed(settlementId, msg.sender, reason);
+    }
+
+    /**
+     * @notice Force resolve a settlement (admin only, for emergencies)
+     * @param settlementId The settlement to resolve
+     * @param shouldFinalize True to finalize, false to fail
+     */
+    function emergencyResolve(uint256 settlementId, bool shouldFinalize) 
+        external 
+        onlyAdmin 
+        nonReentrant 
+    {
+        require(settlementId < nextSettlementId, "Settlement does not exist");
+        
+        Settlement storage s = settlements[settlementId];
+        require(s.state == SettlementState.DISPUTED, "Not disputed");
+        
+        if (shouldFinalize) {
+            // Execute remaining transfers
+            while (s.executedTransfers < s.transfers.length) {
+                Transfer storage t = s.transfers[s.executedTransfers];
+                
+                UserDeposit storage ud = userDeposits[t.from][settlementId];
+                if (ud.amount >= t.amount && ud.locked) {
+                    ud.amount -= t.amount;
+                    
+                    (bool success, ) = t.to.call{value: t.amount}("");
+                    if (success) {
+                        t.executed = true;
+                        emit TransferExecuted(settlementId, s.executedTransfers, t.from, t.to, t.amount);
+                    }
+                }
+                s.executedTransfers++;
+            }
+            
+            s.state = SettlementState.FINALIZED;
+            emit SettlementFinalized(settlementId, block.number, s.totalDeposited);
+            emit DisputeResolved(settlementId, s.oraclePrice, block.number);
+        } else {
+            // Refund all deposits
+            for (uint256 i = 0; i < s.transfers.length; i++) {
+                address from = s.transfers[i].from;
+                UserDeposit storage ud = userDeposits[from][settlementId];
+                
+                if (ud.amount > 0 && ud.locked) {
+                    uint256 refundAmount = ud.amount;
+                    ud.amount = 0;
+                    ud.locked = false;
+                    
+                    (bool success, ) = from.call{value: refundAmount}("");
+                    if (success) {
+                        emit RefundIssued(from, settlementId, refundAmount);
+                    }
+                }
+            }
+            
+            s.state = SettlementState.FAILED;
+            emit DisputeResolved(settlementId, 0, block.number);
+        }
     }
 
     // ============================================
@@ -670,6 +1091,6 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
     // ============================================
 
     receive() external payable {
-        revert("Use deposit() function");
+        revert("deposit");
     }
 }

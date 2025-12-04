@@ -76,25 +76,23 @@ describe("SettlementProtocol", function () {
       const transfers = [{ from: alice.address, to: bob.address, amount: ONE_ETH, executed: false }];
       await settlementProtocol.connect(alice).createSettlement(transfers, 0);
 
-      await expect(settlementProtocol.connect(alice).deposit(1, { value: 0 })).to.be.revertedWith("Zero deposit");
+      await expect(settlementProtocol.connect(alice).deposit(1, { value: 0 })).to.be.revertedWith("0");
     });
 
     it("1.5 Should reject empty transfer arrays", async function () {
-      await expect(settlementProtocol.connect(alice).createSettlement([], 0)).to.be.revertedWith("No transfers");
+      await expect(settlementProtocol.connect(alice).createSettlement([], 0)).to.be.revertedWith("empty");
     });
 
     it("1.6 Should reject transfers to zero address", async function () {
       const transfers = [{ from: alice.address, to: ZERO_ADDRESS, amount: ONE_ETH, executed: false }];
 
-      await expect(settlementProtocol.connect(alice).createSettlement(transfers, 0)).to.be.revertedWith(
-        "Invalid recipient",
-      );
+      await expect(settlementProtocol.connect(alice).createSettlement(transfers, 0)).to.be.revertedWith("0x");
     });
 
     it("1.7 Should reject zero amount transfers", async function () {
       const transfers = [{ from: alice.address, to: bob.address, amount: 0, executed: false }];
 
-      await expect(settlementProtocol.connect(alice).createSettlement(transfers, 0)).to.be.revertedWith("Zero amount");
+      await expect(settlementProtocol.connect(alice).createSettlement(transfers, 0)).to.be.revertedWith("0val");
     });
 
     it("1.8 Should correctly report canInitiate status", async function () {
@@ -146,7 +144,7 @@ describe("SettlementProtocol", function () {
       // First settlement must be initiated first (FIFO)
       await settlementProtocol.connect(alice).initiateSettlement(1);
 
-      await expect(settlementProtocol.connect(bob).initiateSettlement(2)).to.be.revertedWith("Insufficient deposits");
+      await expect(settlementProtocol.connect(bob).initiateSettlement(2)).to.be.revertedWith("!funds");
     });
 
     it("2.3 Should transition from INITIATED to EXECUTING", async function () {
@@ -359,7 +357,7 @@ describe("SettlementProtocol", function () {
       await settlementProtocol.setManualPrice(2, VALID_PRICE);
 
       // Try to initiate second settlement first (should fail)
-      await expect(settlementProtocol.connect(bob).initiateSettlement(2)).to.be.revertedWith("Not next in queue");
+      await expect(settlementProtocol.connect(bob).initiateSettlement(2)).to.be.revertedWith("!queue");
 
       // Initiate first settlement (should succeed)
       await settlementProtocol.connect(alice).initiateSettlement(1);
@@ -431,13 +429,13 @@ describe("SettlementProtocol", function () {
       // Contract rejects direct ETH transfers
       await expect(
         owner.sendTransaction({ to: await settlementProtocol.getAddress(), value: ONE_ETH }),
-      ).to.be.revertedWith("Use deposit() function");
+      ).to.be.revertedWith("deposit");
     });
 
     it("6.2 Should prevent unauthorized admin actions", async function () {
-      await expect(settlementProtocol.connect(attacker).pause()).to.be.revertedWith("Only admin");
+      await expect(settlementProtocol.connect(attacker).pause()).to.be.revertedWith("!admin");
 
-      await expect(settlementProtocol.connect(attacker).unpause()).to.be.revertedWith("Only admin");
+      await expect(settlementProtocol.connect(attacker).unpause()).to.be.revertedWith("!admin");
     });
 
     it("6.3 Should prevent operations when paused", async function () {
@@ -445,15 +443,11 @@ describe("SettlementProtocol", function () {
 
       const transfers = [{ from: alice.address, to: bob.address, amount: ONE_ETH, executed: false }];
 
-      await expect(settlementProtocol.connect(alice).createSettlement(transfers, 0)).to.be.revertedWith(
-        "Protocol paused",
-      );
+      await expect(settlementProtocol.connect(alice).createSettlement(transfers, 0)).to.be.revertedWith("paused");
     });
 
     it("6.4 Should prevent deposit to non-existent settlement", async function () {
-      await expect(settlementProtocol.connect(alice).deposit(999, { value: ONE_ETH })).to.be.revertedWith(
-        "Settlement does not exist",
-      );
+      await expect(settlementProtocol.connect(alice).deposit(999, { value: ONE_ETH })).to.be.revertedWith("!exist");
     });
 
     it("6.5 Should prevent deposit to non-PENDING settlement", async function () {
@@ -464,9 +458,7 @@ describe("SettlementProtocol", function () {
       await settlementProtocol.connect(alice).initiateSettlement(1);
 
       // Try to deposit after initiation
-      await expect(settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH })).to.be.revertedWith(
-        "Invalid state",
-      );
+      await expect(settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH })).to.be.revertedWith("!state");
     });
 
     it("6.6 Should prevent refund before timeout", async function () {
@@ -474,7 +466,7 @@ describe("SettlementProtocol", function () {
       await settlementProtocol.connect(alice).createSettlement(transfers, 1000);
       await settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH });
 
-      await expect(settlementProtocol.connect(alice).refundSettlement(1)).to.be.revertedWith("Cannot refund yet");
+      await expect(settlementProtocol.connect(alice).refundSettlement(1)).to.be.revertedWith("!refund");
     });
   });
 
@@ -510,9 +502,7 @@ describe("SettlementProtocol", function () {
         });
       }
 
-      await expect(settlementProtocol.connect(alice).createSettlement(transfers, 0)).to.be.revertedWith(
-        "Too many transfers",
-      );
+      await expect(settlementProtocol.connect(alice).createSettlement(transfers, 0)).to.be.revertedWith(">100");
     });
 
     it("7.3 Should handle multiple deposits from same user", async function () {
