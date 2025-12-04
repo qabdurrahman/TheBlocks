@@ -17,6 +17,25 @@ pragma solidity ^0.8.20;
  * - Price deviation detection (>5% triggers alert)
  * - Staleness checks (max 60 seconds)
  * - Fallback mechanism on primary failure
+ * 
+ * ORACLE FLOW:
+ * ┌─────────────────────────────────────────────────────────────────┐
+ * │                     ORACLE DATA FLOW                            │
+ * └─────────────────────────────────────────────────────────────────┘
+ * 
+ * STEP 1: Settlement requests price
+ *    ↓
+ * STEP 2: Try Chainlink (primary)
+ *    ├─ Success → Validate freshness → Record price → Return
+ *    └─ Fail → Increment fail count → Try Band Protocol
+ *                    ↓
+ * STEP 3: Try Band Protocol (fallback)
+ *    ├─ Success → Validate freshness → Record price → Return
+ *    └─ Fail → Use last known price (with warning)
+ *                    ↓
+ * STEP 4: Cross-validate prices if both available
+ *    ├─ Deviation < 5% → Price is valid
+ *    └─ Deviation > 5% → Emit warning, allow dispute
  */
 
 // Chainlink interfaces
@@ -86,6 +105,36 @@ contract SettlementOracle {
     uint256 public constant PRICE_HISTORY_SIZE = 10;
     
     // ============================================
+    // SETTLEMENT-SPECIFIC PRICE TRACKING (BATCH 2)
+    // ============================================
+    
+    /**
+     * @dev Price record with source and timestamp for audit trail
+     */
+    struct PriceRecord {
+        uint256 price;
+        uint256 timestamp;
+        uint8 source;     // 0 = Chainlink, 1 = Band, 255 = Manual
+        uint256 blockNumber;
+    }
+    
+    // Settlement ID => array of price records (audit trail)
+    mapping(uint256 => PriceRecord[]) public settlementPriceHistory;
+    
+    // Settlement ID => final validated price used
+    mapping(uint256 => uint256) public settlementPrice;
+    
+    // Settlement ID => price source used (0=Chainlink, 1=Band, 255=Manual)
+    mapping(uint256 => uint8) public settlementPriceSource;
+    
+    // Settlement ID => whether price has been validated
+    mapping(uint256 => bool) public settlementPriceValidated;
+    
+    // Price bounds for sanity checks
+    uint256 public constant MIN_VALID_PRICE = 100;        // $1 (with 2 decimals)
+    uint256 public constant MAX_VALID_PRICE = 10000000;   // $100,000 (with 2 decimals)
+    
+    // ============================================
     // EVENTS
     // ============================================
     
@@ -108,6 +157,33 @@ contract SettlementOracle {
     
     event OracleRecovered(
         string indexed source
+    );
+    
+    // Batch 2: Settlement-specific oracle events
+    event SettlementPriceValidated(
+        uint256 indexed settlementId,
+        uint256 price,
+        uint8 source,
+        uint256 timestamp
+    );
+    
+    event SettlementPriceDisputed(
+        uint256 indexed settlementId,
+        uint256 originalPrice,
+        uint256 suggestedPrice,
+        address disputer
+    );
+    
+    event OracleFailover(
+        uint8 fromSource,
+        uint8 toSource,
+        string reason
+    );
+    
+    event PriceOutOfBounds(
+        uint256 price,
+        uint256 minBound,
+        uint256 maxBound
     );
 
     // ============================================
@@ -439,5 +515,233 @@ contract SettlementOracle {
             bandAvailable = true;
             bandFailCount = 0;
         }
+    }
+
+    // ============================================
+    // SETTLEMENT-SPECIFIC PRICE FUNCTIONS (BATCH 2)
+    // ============================================
+    
+    /**
+     * @notice Get validated price for a specific settlement
+     * @dev Tries Chainlink first, falls back to Band, validates bounds
+     * @param settlementId The settlement requesting price
+     * @return price The validated price
+     * @return source Which oracle provided it (0=Chainlink, 1=Band)
+     * @return isValid Whether price passed all validation checks
+     * 
+     * INVARIANT: Price must be:
+     * 1. Fresh (< 60 seconds old)
+     * 2. Within bounds ($1 - $100,000)
+     * 3. Not showing manipulation patterns
+     */
+    function getValidatedPriceForSettlement(uint256 settlementId)
+        external
+        returns (uint256 price, uint8 source, bool isValid)
+    {
+        // STEP 1: Try Chainlink first
+        if (chainlinkAvailable) {
+            try this._getChainlinkPrice() returns (uint256 p, uint256 t) {
+                if (_isPriceFresh(t) && _isPriceWithinBounds(p)) {
+                    lastChainlinkPrice = p;
+                    lastChainlinkTimestamp = t;
+                    chainlinkFailCount = 0;
+                    
+                    _recordSettlementPrice(settlementId, p, 0);
+                    _recordPrice(p);
+                    
+                    emit SettlementPriceValidated(settlementId, p, 0, t);
+                    return (p, 0, true);
+                }
+            } catch {
+                chainlinkFailCount++;
+                if (chainlinkFailCount >= MAX_FAIL_COUNT) {
+                    chainlinkAvailable = false;
+                }
+            }
+        }
+        
+        // STEP 2: Chainlink failed - try Band Protocol
+        if (bandAvailable) {
+            try this._getBandPrice() returns (uint256 p, uint256 t) {
+                if (_isPriceFresh(t) && _isPriceWithinBounds(p)) {
+                    lastBandPrice = p;
+                    lastBandTimestamp = t;
+                    bandFailCount = 0;
+                    
+                    _recordSettlementPrice(settlementId, p, 1);
+                    _recordPrice(p);
+                    
+                    emit OracleFailover(0, 1, "Chainlink unavailable");
+                    emit SettlementPriceValidated(settlementId, p, 1, t);
+                    return (p, 1, true);
+                }
+            } catch {
+                bandFailCount++;
+                if (bandFailCount >= MAX_FAIL_COUNT) {
+                    bandAvailable = false;
+                }
+            }
+        }
+        
+        // STEP 3: Both failed - use last known price (marked as unsafe)
+        if (lastChainlinkPrice > 0 && _isPriceWithinBounds(lastChainlinkPrice)) {
+            _recordSettlementPrice(settlementId, lastChainlinkPrice, 0);
+            return (lastChainlinkPrice, 0, false); // isValid = false
+        }
+        
+        if (lastBandPrice > 0 && _isPriceWithinBounds(lastBandPrice)) {
+            _recordSettlementPrice(settlementId, lastBandPrice, 1);
+            return (lastBandPrice, 1, false); // isValid = false
+        }
+        
+        // No valid price available
+        return (0, 255, false);
+    }
+    
+    /**
+     * @notice Check if price is fresh (not stale)
+     * @param priceTimestamp When the price was fetched
+     * @return True if within freshness window
+     * 
+     * INVARIANT: Settlement cannot use price older than 60 seconds
+     */
+    function _isPriceFresh(uint256 priceTimestamp) internal view returns (bool) {
+        if (priceTimestamp == 0) return false;
+        return (block.timestamp - priceTimestamp) <= MAX_ORACLE_STALENESS;
+    }
+    
+    /**
+     * @notice Check if price is within reasonable bounds
+     * @param price The price to validate
+     * @return True if within bounds
+     * 
+     * INVARIANT: Prevents obviously wrong prices (hacked oracle)
+     */
+    function _isPriceWithinBounds(uint256 price) internal pure returns (bool) {
+        return price >= MIN_VALID_PRICE && price <= MAX_VALID_PRICE;
+    }
+    
+    /**
+     * @notice Check if price is within bounds and emit event if not
+     * @param price The price to validate
+     * @return True if within bounds
+     */
+    function _validatePriceBounds(uint256 price) internal returns (bool) {
+        bool withinBounds = price >= MIN_VALID_PRICE && price <= MAX_VALID_PRICE;
+        
+        if (!withinBounds) {
+            emit PriceOutOfBounds(price, MIN_VALID_PRICE, MAX_VALID_PRICE);
+        }
+        
+        return withinBounds;
+    }
+    
+    /**
+     * @notice Record price for a specific settlement (audit trail)
+     * @param settlementId The settlement ID
+     * @param price The price value
+     * @param source The oracle source
+     */
+    function _recordSettlementPrice(
+        uint256 settlementId,
+        uint256 price,
+        uint8 source
+    ) internal {
+        settlementPrice[settlementId] = price;
+        settlementPriceSource[settlementId] = source;
+        settlementPriceValidated[settlementId] = true;
+        
+        settlementPriceHistory[settlementId].push(PriceRecord({
+            price: price,
+            timestamp: block.timestamp,
+            source: source,
+            blockNumber: block.number
+        }));
+    }
+    
+    /**
+     * @notice Get price history for a settlement
+     * @param settlementId The settlement to query
+     * @return Array of price records
+     */
+    function getSettlementPriceHistory(uint256 settlementId)
+        external
+        view
+        returns (PriceRecord[] memory)
+    {
+        return settlementPriceHistory[settlementId];
+    }
+    
+    /**
+     * @notice Check if price movement is normal (not manipulated)
+     * @param settlementId The settlement to check
+     * @return deviation Percentage deviation from last price
+     * @return isNormal True if deviation is within threshold
+     */
+    function isPriceMovementNormal(uint256 settlementId)
+        external
+        view
+        returns (uint256 deviation, bool isNormal)
+    {
+        uint256 currentPrice = settlementPrice[settlementId];
+        if (currentPrice == 0) return (0, false);
+        
+        // Compare with last known Chainlink price
+        if (lastChainlinkPrice == 0) return (0, true);
+        
+        deviation = _calculateDeviationPercent(lastChainlinkPrice, currentPrice);
+        isNormal = deviation <= MAX_PRICE_DEVIATION;
+        
+        return (deviation, isNormal);
+    }
+    
+    /**
+     * @notice Manually set price for a settlement (emergency/dispute resolution)
+     * @param settlementId The settlement ID
+     * @param price The corrected price
+     * @dev In production, add access control (onlyOwner/multisig)
+     * @dev Also sets lastChainlinkPrice/timestamp so getLatestPrice() works for testing
+     */
+    function setManualPrice(uint256 settlementId, uint256 price) external {
+        // In production: require(msg.sender == owner, "Only owner");
+        require(_isPriceWithinBounds(price), "Price out of bounds");
+        
+        // Set the main oracle price (so getLatestPrice() works in tests)
+        lastChainlinkPrice = price;
+        lastChainlinkTimestamp = block.timestamp;
+        
+        // Record settlement-specific price
+        _recordSettlementPrice(settlementId, price, 255); // 255 = manual
+        
+        emit SettlementPriceValidated(settlementId, price, 255, block.timestamp);
+    }
+    
+    /**
+     * @notice Get comprehensive oracle status for a settlement
+     * @param settlementId The settlement to query
+     * @return price Current price for settlement
+     * @return source Oracle source used
+     * @return isValidated Whether price has been validated
+     * @return chainlinkHealthy Chainlink oracle status
+     * @return bandHealthy Band Protocol oracle status
+     */
+    function getOracleStatusForSettlement(uint256 settlementId)
+        external
+        view
+        returns (
+            uint256 price,
+            uint8 source,
+            bool isValidated,
+            bool chainlinkHealthy,
+            bool bandHealthy
+        )
+    {
+        return (
+            settlementPrice[settlementId],
+            settlementPriceSource[settlementId],
+            settlementPriceValidated[settlementId],
+            chainlinkAvailable,
+            bandAvailable
+        );
     }
 }

@@ -119,10 +119,15 @@ describe("SettlementProtocol", function () {
   // ============================================
 
   describe("2. State Machine Transitions", function () {
+    // Valid price in 2 decimals as per oracle contract
+    const VALID_PRICE = 200000n; // $2000.00
+
     beforeEach(async function () {
       const transfers = [{ from: alice.address, to: bob.address, amount: ONE_ETH, executed: false }];
       await settlementProtocol.connect(alice).createSettlement(transfers, 0);
       await settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH });
+      // Set manual price for oracle (required for initiation)
+      await settlementProtocol.setManualPrice(1, VALID_PRICE);
     });
 
     it("2.1 Should transition from PENDING to INITIATED", async function () {
@@ -136,6 +141,7 @@ describe("SettlementProtocol", function () {
       const transfers = [{ from: bob.address, to: charlie.address, amount: TEN_ETH, executed: false }];
       await settlementProtocol.connect(bob).createSettlement(transfers, 0);
       await settlementProtocol.connect(bob).deposit(2, { value: ONE_ETH });
+      await settlementProtocol.setManualPrice(2, VALID_PRICE);
 
       // First settlement must be initiated first (FIFO)
       await settlementProtocol.connect(alice).initiateSettlement(1);
@@ -194,10 +200,14 @@ describe("SettlementProtocol", function () {
   // ============================================
 
   describe("3. Invariant Verification", function () {
+    // Valid price in 2 decimals as per oracle contract
+    const VALID_PRICE = 200000n; // $2000.00
+
     it("3.1 INVARIANT 1: Conservation of Value - deposits equal withdrawals", async function () {
       const transfers = [{ from: alice.address, to: bob.address, amount: ONE_ETH, executed: false }];
       await settlementProtocol.connect(alice).createSettlement(transfers, 0);
       await settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH });
+      await settlementProtocol.setManualPrice(1, VALID_PRICE);
       await settlementProtocol.connect(alice).initiateSettlement(1);
 
       const bobBalanceBefore = await ethers.provider.getBalance(bob.address);
@@ -217,6 +227,7 @@ describe("SettlementProtocol", function () {
       const transfers = [{ from: alice.address, to: bob.address, amount: ONE_ETH, executed: false }];
       await settlementProtocol.connect(alice).createSettlement(transfers, 0);
       await settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH });
+      await settlementProtocol.setManualPrice(1, VALID_PRICE);
       await settlementProtocol.connect(alice).initiateSettlement(1);
 
       // Mine blocks for confirmation
@@ -266,6 +277,7 @@ describe("SettlementProtocol", function () {
       ];
       await settlementProtocol.connect(alice).createSettlement(transfers, 0);
       await settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH });
+      await settlementProtocol.setManualPrice(1, VALID_PRICE);
       await settlementProtocol.connect(alice).initiateSettlement(1);
 
       // Mine blocks for confirmation
@@ -330,6 +342,9 @@ describe("SettlementProtocol", function () {
   // ============================================
 
   describe("5. Fair Ordering / MEV Resistance", function () {
+    // Valid price in 2 decimals as per oracle contract
+    const VALID_PRICE = 200000n; // $2000.00
+
     it("5.1 Should enforce FIFO queue order", async function () {
       // Create two settlements
       const transfers1 = [{ from: alice.address, to: bob.address, amount: ONE_ETH, executed: false }];
@@ -340,6 +355,8 @@ describe("SettlementProtocol", function () {
 
       await settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH });
       await settlementProtocol.connect(bob).deposit(2, { value: ONE_ETH });
+      await settlementProtocol.setManualPrice(1, VALID_PRICE);
+      await settlementProtocol.setManualPrice(2, VALID_PRICE);
 
       // Try to initiate second settlement first (should fail)
       await expect(settlementProtocol.connect(bob).initiateSettlement(2)).to.be.revertedWith("Not next in queue");
@@ -375,6 +392,7 @@ describe("SettlementProtocol", function () {
 
       await settlementProtocol.connect(alice).createSettlement(transfers, 0);
       await settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH });
+      await settlementProtocol.setManualPrice(1, VALID_PRICE);
 
       expect(await settlementProtocol.queueHead()).to.equal(0);
 
@@ -406,6 +424,9 @@ describe("SettlementProtocol", function () {
   // ============================================
 
   describe("6. Adversarial Scenarios", function () {
+    // Valid price in 2 decimals as per oracle contract
+    const VALID_PRICE = 200000n; // $2000.00
+
     it("6.1 Should prevent reentrancy attack via receive()", async function () {
       // Contract rejects direct ETH transfers
       await expect(
@@ -439,6 +460,7 @@ describe("SettlementProtocol", function () {
       const transfers = [{ from: alice.address, to: bob.address, amount: ONE_ETH, executed: false }];
       await settlementProtocol.connect(alice).createSettlement(transfers, 0);
       await settlementProtocol.connect(alice).deposit(1, { value: ONE_ETH });
+      await settlementProtocol.setManualPrice(1, VALID_PRICE);
       await settlementProtocol.connect(alice).initiateSettlement(1);
 
       // Try to deposit after initiation
