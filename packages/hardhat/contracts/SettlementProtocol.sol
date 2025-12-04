@@ -3,12 +3,13 @@ pragma solidity ^0.8.20;
 
 import "./SettlementOracle.sol";
 import "./SettlementInvariants.sol";
+import "./FinalityController.sol";
 
 /**
  * @title SettlementProtocol
  * @author TheBlocks Team - TriHacker Tournament 2025
  * @notice Adversarial-Resilient Settlement Protocol for processing trades/transfers on-chain
- * @dev Implements fair ordering, partial finality, oracle manipulation resistance, and attack defenses
+ * @dev Implements fair ordering, 3-phase finality, oracle manipulation resistance, and attack defenses
  * 
  * ARCHITECTURE:
  * ┌──────────────────────────────────────────────┐
@@ -30,7 +31,13 @@ import "./SettlementInvariants.sol";
  * │  ├─ Verify timeouts                          │
  * │  └─ Ensure partial finality                  │
  * │                                              │
- * │  CONTRACT 4: SettlementProtocol (Execution)  │
+ * │  CONTRACT 4: FinalityController (NEW!)       │
+ * │  ├─ 3-Phase Finality: TENTATIVE→SEMI→FINAL  │
+ * │  ├─ BFT Quorum Validation                   │
+ * │  ├─ Reorg Rollback Handler                  │
+ * │  └─ LTL Temporal Property Enforcement       │
+ * │                                              │
+ * │  CONTRACT 5: SettlementProtocol (Execution)  │
  * │  ├─ Initiates settlements                    │
  * │  ├─ Executes transfers                       │
  * │  ├─ Handles disputes                         │
@@ -40,11 +47,12 @@ import "./SettlementInvariants.sol";
  * KEY FEATURES:
  * 1. Fair Ordering - FIFO queue prevents validator reordering (MEV resistance)
  * 2. Invariant Enforcement - 5 core invariants mathematically proven
- * 3. Partial Finality Logic - Multi-block settlement with state tracking
+ * 3. Three-Phase Finality - TENTATIVE → SEMI_FINAL → FINAL with BFT quorum
  * 4. Oracle Manipulation Resistance - Dual oracle with dispute mechanism
- * 5. Attack Model Clarity - Comprehensive threat defenses
+ * 5. Reorg Resilience - Idempotent rollback with state restoration
+ * 6. LTL Properties - Formal temporal logic enforcement
  */
-contract SettlementProtocol is SettlementOracle, SettlementInvariants {
+contract SettlementProtocol is SettlementOracle, SettlementInvariants, FinalityController {
     
     // ============================================
     // STATE MACHINE DEFINITION
@@ -574,7 +582,8 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
     // ============================================
 
     /**
-     * @dev Finalize a completed settlement
+     * @dev Finalize a completed settlement with 3-phase finality
+     * Starts TENTATIVE phase, progresses through SEMI_FINAL to FINAL
      */
     function _finalizeSettlement(uint256 settlementId) internal {
         Settlement storage s = settlements[settlementId];
@@ -588,6 +597,15 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
         
         s.state = SettlementState.FINALIZED;
         s.finalizedBlock = block.number;
+        
+        // Initialize 3-Phase Finality tracking
+        bytes32 stateRoot = keccak256(abi.encode(
+            settlementId,
+            s.totalDeposited,
+            totalTransferred,
+            block.number
+        ));
+        _initializeFinality(settlementId, stateRoot);
         
         emit SettlementFinalized(settlementId, block.number, totalTransferred);
     }
@@ -1084,6 +1102,89 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants {
             s.state = SettlementState.FAILED;
             emit DisputeResolved(settlementId, 0, block.number);
         }
+    }
+
+    // ============================================
+    // FINALITY MANAGEMENT
+    // ============================================
+    
+    /**
+     * @notice Register a validator for BFT quorum voting
+     * @param validator Address of the validator to register
+     */
+    function registerValidator(address validator) external onlyAdmin {
+        _addValidator(validator);
+    }
+    
+    /**
+     * @notice Remove a validator from BFT quorum
+     * @param validator Address of the validator to remove
+     */
+    function removeValidator(address validator) external onlyAdmin {
+        _removeValidator(validator);
+    }
+    
+    /**
+     * @notice Get complete finality information for a settlement
+     * @param settlementId Settlement to check
+     * @return phase Current finality phase (0=TENTATIVE, 1=SEMI_FINAL, 2=FINAL)
+     * @return confirmations Number of block confirmations
+     * @return confidence Confidence score 0-100
+     * @return isFinal True if irreversibly final
+     */
+    function getSettlementFinality(
+        uint256 settlementId
+    ) external view returns (
+        FinalityPhase phase,
+        uint256 confirmations,
+        uint256 confidence,
+        bool isFinal
+    ) {
+        (phase,,,,confirmations, isFinal,) = getFinalityStatus(settlementId);
+        confidence = getFinalityConfidence(settlementId);
+    }
+    
+    /**
+     * @notice Check if settlement is safe from reorgs
+     * @param settlementId Settlement to check
+     * @param requiredDepth Required confirmation depth
+     * @return safe True if safe from reorgs at the specified depth
+     */
+    function isReorgSafeAtDepth(
+        uint256 settlementId,
+        uint256 requiredDepth
+    ) external view returns (bool safe) {
+        (,uint256 tentativeBlock,,,,, bool reorgDetected) = getFinalityStatus(settlementId);
+        if (reorgDetected) return false;
+        return block.number >= tentativeBlock + requiredDepth;
+    }
+    
+    /**
+     * @notice Manually trigger reorg detection (for testing/monitoring)
+     * @param settlementId Settlement to check
+     * @param expectedPrevHash Expected previous block hash
+     */
+    function checkForReorg(
+        uint256 settlementId,
+        bytes32 expectedPrevHash
+    ) external returns (bool detected, uint256 depth) {
+        return detectReorg(settlementId, expectedPrevHash);
+    }
+    
+    /**
+     * @notice Admin function to recover from detected reorg
+     * @param settlementId Settlement to recover
+     */
+    function recoverFromReorg(uint256 settlementId) external onlyAdmin {
+        Settlement storage s = settlements[settlementId];
+        
+        bytes32 newStateRoot = keccak256(abi.encode(
+            settlementId,
+            s.totalDeposited,
+            block.number
+        ));
+        
+        _recoverFromReorg(settlementId, FinalityPhase.TENTATIVE, newStateRoot);
     }
 
     // ============================================
