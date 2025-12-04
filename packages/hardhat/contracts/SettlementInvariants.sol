@@ -552,6 +552,120 @@ abstract contract SettlementInvariants {
         
         return status;
     }
+    // ============================================
+    // CHECKPOINT / SNAPSHOT FOR REORG SAFETY
+    // ============================================
+    
+    /// @notice Checkpoint storage for reorg detection
+    struct Checkpoint {
+        bytes32 stateHash;       // Hash of settlement state at checkpoint
+        uint256 blockNumber;     // Block when checkpoint was created
+        bytes32 blockHash;       // Block hash for reorg detection
+        uint256 totalValue;      // Total value locked at checkpoint
+        bool valid;              // Whether checkpoint is active
+    }
+    
+    mapping(uint256 => Checkpoint) public settlementCheckpoints;
+    
+    /**
+     * @notice Create a checkpoint before execution for reorg safety
+     * @param settlementId The settlement to checkpoint
+     * @param totalValue Total value in the settlement
+     * @param executedCount Number of transfers already executed
+     */
+    function _createCheckpoint(
+        uint256 settlementId,
+        uint256 totalValue,
+        uint256 executedCount
+    ) internal {
+        bytes32 stateHash = keccak256(abi.encode(
+            settlementId,
+            totalValue,
+            executedCount,
+            msg.sender,
+            block.number
+        ));
+        
+        settlementCheckpoints[settlementId] = Checkpoint({
+            stateHash: stateHash,
+            blockNumber: block.number,
+            blockHash: blockhash(block.number - 1), // Previous block hash
+            totalValue: totalValue,
+            valid: true
+        });
+    }
+    
+    /**
+     * @notice Verify checkpoint hasn't been affected by reorg
+     * @param settlementId The settlement to verify
+     * @return valid True if checkpoint is still valid (no reorg detected)
+     * @return reason Explanation
+     */
+    function verifyCheckpoint(
+        uint256 settlementId
+    ) public view returns (bool valid, string memory reason) {
+        Checkpoint storage cp = settlementCheckpoints[settlementId];
+        
+        if (!cp.valid) {
+            return (false, "Checkpoint not active");
+        }
+        
+        // Can only verify blockhash for last 256 blocks
+        if (block.number > cp.blockNumber + 256) {
+            return (true, "Checkpoint too old to verify (assumed valid)");
+        }
+        
+        // Check if block hash matches (reorg detection)
+        if (cp.blockNumber > 0 && blockhash(cp.blockNumber - 1) != cp.blockHash) {
+            return (false, "Reorg detected: block hash mismatch");
+        }
+        
+        return (true, "Checkpoint verified");
+    }
+    
+    /**
+     * @notice Invalidate a checkpoint (after successful finalization)
+     */
+    function _invalidateCheckpoint(uint256 settlementId) internal {
+        settlementCheckpoints[settlementId].valid = false;
+    }
+    
+    // ============================================
+    // PUBLIC INVARIANT VERIFICATION
+    // ============================================
+    
+    /**
+     * @notice Verify all 5 invariants with detailed results
+     * @param settlementId The settlement to verify
+     * @return allPassed True if all invariants hold
+     * @return inv1 Conservation of value
+     * @return inv2 No double settlement
+     * @return inv3 Oracle freshness
+     * @return inv4 Timeout liveness
+     * @return inv5 Partial finality order
+     */
+    function verifyInvariantsDetailed(
+        uint256 settlementId
+    ) public view returns (
+        bool allPassed,
+        bool inv1,
+        bool inv2,
+        bool inv3,
+        bool inv4,
+        bool inv5
+    ) {
+        (inv1,) = _checkConservationOfValue(settlementId);
+        (inv2,) = _checkNoDoubleSettlement(settlementId);
+        (inv3,) = _checkOracleFreshness(settlementId);
+        (inv4,) = _checkTimeoutNotExceeded(settlementId);
+        
+        // INV5: Partial finality order
+        uint256 progress = partialExecutionProgress[settlementId];
+        uint256 total = totalTransfersInSettlement[settlementId];
+        inv5 = (total == 0) || (progress <= total);
+        
+        allPassed = inv1 && inv2 && inv3 && inv4 && inv5;
+    }
     
     /**
      * @notice Legacy verification function for backwards compatibility

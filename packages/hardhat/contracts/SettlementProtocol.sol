@@ -421,6 +421,7 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants, FinalityC
     function executeSettlement(uint256 settlementId, uint256 maxTransfers) 
         external 
         notPaused 
+        nonReentrant
         validSettlement(settlementId)
     {
         Settlement storage s = settlements[settlementId];
@@ -458,13 +459,15 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants, FinalityC
             Transfer storage t = s.transfers[i];
             
             if (!t.executed) {
-                // Execute transfer
-                (bool success, ) = t.to.call{value: t.amount}("");
-                require(success, "!xfer");
-                
+                // SECURITY FIX: Update state BEFORE external call (CEI pattern)
+                // Prevents reentrancy attack where attacker re-enters before state update
                 t.executed = true;
                 s.executedTransfers++;
                 executed++;
+                
+                // Execute transfer (external call AFTER state update)
+                (bool success, ) = t.to.call{value: t.amount}("");
+                require(success, "!xfer");
                 
                 emit TransferExecuted(settlementId, i, t.from, t.to, t.amount);
             }
@@ -546,6 +549,7 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants, FinalityC
      */
     function refundSettlement(uint256 settlementId) 
         external 
+        nonReentrant
         validSettlement(settlementId)
     {
         Settlement storage s = settlements[settlementId];
@@ -1102,6 +1106,87 @@ contract SettlementProtocol is SettlementOracle, SettlementInvariants, FinalityC
             s.state = SettlementState.FAILED;
             emit DisputeResolved(settlementId, 0, block.number);
         }
+    }
+
+    // ============================================
+    // HELPER VIEW FUNCTIONS (for tests & UI)
+    // ============================================
+    
+    /**
+     * @notice Get the unique hash for a settlement (replay protection)
+     * @param settlementId Settlement to get hash for
+     * @return hash The settlement's unique hash
+     */
+    function getSettlementHash(uint256 settlementId) 
+        external 
+        view 
+        returns (bytes32 hash) 
+    {
+        require(settlementId < nextSettlementId, "!exist");
+        return settlements[settlementId].settlementHash;
+    }
+    
+    /**
+     * @notice Get all transfers for a settlement
+     * @param settlementId Settlement to query
+     * @return transfers Array of Transfer structs
+     */
+    function getSettlementTransfers(uint256 settlementId) 
+        external 
+        view 
+        returns (Transfer[] memory transfers) 
+    {
+        require(settlementId < nextSettlementId, "!exist");
+        return settlements[settlementId].transfers;
+    }
+    
+    /**
+     * @notice Get invariant summary for a specific settlement
+     * @param settlementId Settlement to query
+     * @return deposits Total deposits for this settlement
+     * @return withdrawals Total withdrawals
+     * @return fees Fees collected
+     * @return executedCount Number of transfers executed
+     * @return isExecuted Whether settlement is fully executed
+     */
+    function getInvariantSummary(uint256 settlementId) 
+        external 
+        view 
+        returns (
+            uint256 deposits,
+            uint256 withdrawals,
+            uint256 fees,
+            uint256 executedCount,
+            bool isExecuted
+        ) 
+    {
+        require(settlementId < nextSettlementId, "!exist");
+        Settlement storage s = settlements[settlementId];
+        
+        deposits = s.totalDeposited;
+        withdrawals = 0; // Calculate from executed transfers
+        for (uint256 i = 0; i < s.transfers.length; i++) {
+            if (s.transfers[i].executed) {
+                withdrawals += s.transfers[i].amount;
+            }
+        }
+        fees = 0; // No fees in current implementation
+        executedCount = s.executedTransfers;
+        isExecuted = (s.state == SettlementState.FINALIZED);
+    }
+    
+    /**
+     * @notice Get the current finality phase for a settlement
+     * @param settlementId Settlement to query
+     * @return phase The finality phase (0=TENTATIVE, 1=SEMI_FINAL, 2=FINAL)
+     */
+    function getFinalityPhase(uint256 settlementId) 
+        external 
+        view 
+        returns (uint256 phase) 
+    {
+        (FinalityPhase p,,,,,, ) = getFinalityStatus(settlementId);
+        return uint256(p);
     }
 
     // ============================================
