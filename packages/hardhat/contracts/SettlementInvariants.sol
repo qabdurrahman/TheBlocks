@@ -7,6 +7,12 @@ pragma solidity ^0.8.20;
  * @notice Formal invariant definitions and runtime verification
  * @dev Implements 5 core invariants that are mathematically proven
  * 
+ * ARCHITECTURE LAYER: Safety Checks
+ * - Check conservation of value
+ * - Prevent double settlement
+ * - Verify timeouts
+ * - Ensure partial finality
+ * 
  * INVARIANTS:
  * 1. Conservation of Value - Total in == Total out + fees
  * 2. No Double Settlement - Each settlement ID executes once

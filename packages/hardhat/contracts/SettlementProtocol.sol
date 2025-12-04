@@ -10,6 +10,33 @@ import "./SettlementInvariants.sol";
  * @notice Adversarial-Resilient Settlement Protocol for processing trades/transfers on-chain
  * @dev Implements fair ordering, partial finality, oracle manipulation resistance, and attack defenses
  * 
+ * ARCHITECTURE:
+ * ┌──────────────────────────────────────────────┐
+ * │         SETTLEMENT PROTOCOL ARCHITECTURE     │
+ * ├──────────────────────────────────────────────┤
+ * │  CONTRACT 1: SettlementBase (Foundation)     │
+ * │  ├─ Structs (Settlement, State definitions)  │
+ * │  ├─ State Variables (mappings, counters)     │
+ * │  └─ Events (all activity logged)             │
+ * │                                              │
+ * │  CONTRACT 2: SettlementOracle (Data Fetch)   │
+ * │  ├─ Chainlink integration                    │
+ * │  ├─ Band Protocol fallback                   │
+ * │  └─ Price validation logic                   │
+ * │                                              │
+ * │  CONTRACT 3: SettlementInvariants (Safety)   │
+ * │  ├─ Check conservation of value              │
+ * │  ├─ Prevent double settlement                │
+ * │  ├─ Verify timeouts                          │
+ * │  └─ Ensure partial finality                  │
+ * │                                              │
+ * │  CONTRACT 4: SettlementProtocol (Execution)  │
+ * │  ├─ Initiates settlements                    │
+ * │  ├─ Executes transfers                       │
+ * │  ├─ Handles disputes                         │
+ * │  └─ Manages timeouts                         │
+ * └──────────────────────────────────────────────┘
+ * 
  * KEY FEATURES:
  * 1. Fair Ordering - FIFO queue prevents validator reordering (MEV resistance)
  * 2. Invariant Enforcement - 5 core invariants mathematically proven

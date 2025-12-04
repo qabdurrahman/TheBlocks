@@ -7,6 +7,11 @@ pragma solidity ^0.8.20;
  * @notice Dual Oracle system with Chainlink primary and Band Protocol fallback
  * @dev Implements oracle manipulation resistance with deviation detection and dispute mechanism
  * 
+ * ARCHITECTURE LAYER: Data Fetching
+ * - Chainlink integration (primary oracle)
+ * - Band Protocol fallback (secondary oracle)
+ * - Price validation logic
+ * 
  * SECURITY FEATURES:
  * - Dual oracle architecture (redundancy)
  * - Price deviation detection (>5% triggers alert)
