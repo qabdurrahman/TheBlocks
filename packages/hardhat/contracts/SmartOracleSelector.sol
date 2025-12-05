@@ -48,8 +48,6 @@ pragma solidity ^0.8.20;
  */
 
 import "./API3Adapter.sol";
-import "./DIAAdapter.sol";
-import "./UniswapV3TWAPAdapter.sol";
 
 /**
  * @dev Interface for Chainlink-compatible price feeds
