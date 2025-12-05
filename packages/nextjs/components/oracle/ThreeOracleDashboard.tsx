@@ -181,80 +181,45 @@ export function ThreeOracleDashboard() {
       });
     }
 
-    // 3. API3 via our adapter (with fallback to SyncedPriceFeed)
-    let api3Success = false;
+    // 3. SyncedPriceFeed as 3rd oracle (our multi-oracle aggregator)
+    // This is more reliable than API3 on testnet since we control it
     try {
       const data = await sepoliaClient.readContract({
-        address: CONTRACTS.api3Adapter as `0x${string}`,
-        abi: API3_ADAPTER_ABI,
+        address: CONTRACTS.syncedPriceFeed as `0x${string}`,
+        abi: CHAINLINK_ABI,
         functionName: "latestRoundData",
       });
       
       const price = Number(data[1]) / 1e8;
       const updatedAt = Number(data[3]);
+      const age = now - updatedAt;
+      const hoursStale = age / 3600;
       
-      // Validate the data is reasonable
-      if (price > 0 && price < 100000 && updatedAt > 0) {
-        const age = now - updatedAt;
-        const hoursStale = age / 3600;
-        
-        oracleData.push({
-          name: "API3",
-          type: "first-party",
-          price,
-          timestamp: updatedAt,
-          status: age < 3600 ? "live" : age < 86400 ? "stale" : "error",
-          reliability: hoursStale > 24 ? 50 : hoursStale > 1 ? 70 : 95,
-          latency: "~1 block",
-          icon: "🌐",
-          color: "orange",
-          specialty: `First-Party Data • ${hoursStale > 1 ? `${hoursStale.toFixed(1)}h stale` : "Live"}`,
-        });
-        api3Success = true;
-      }
-    } catch (e) {
-      console.warn("API3 adapter read failed:", e);
-    }
-    
-    // Fallback to SyncedPriceFeed if API3 fails
-    if (!api3Success) {
-      try {
-        const data = await sepoliaClient.readContract({
-          address: CONTRACTS.syncedPriceFeed as `0x${string}`,
-          abi: CHAINLINK_ABI, // SyncedPriceFeed uses same interface
-          functionName: "latestRoundData",
-        });
-        
-        const price = Number(data[1]) / 1e8;
-        const updatedAt = Number(data[3]);
-        const age = now - updatedAt;
-        
-        oracleData.push({
-          name: "SyncedFeed",
-          type: "first-party",
-          price,
-          timestamp: updatedAt,
-          status: age < 3600 ? "live" : age < 7200 ? "stale" : "error",
-          reliability: 90,
-          latency: "~1 block",
-          icon: "🔄",
-          color: "orange",
-          specialty: "Multi-Oracle Sync",
-        });
-      } catch {
-        oracleData.push({
-          name: "API3/Sync",
-          type: "first-party",
-          price: 0,
-          timestamp: 0,
-          status: "error",
-          reliability: 0,
-          latency: "--",
-          icon: "🌐",
-          color: "orange",
-          specialty: "First-Party Data (Offline)",
-        });
-      }
+      oracleData.push({
+        name: "SyncedFeed",
+        type: "first-party",
+        price,
+        timestamp: updatedAt,
+        status: age < 3600 ? "live" : age < 7200 ? "stale" : "error",
+        reliability: age < 3600 ? 95 : age < 7200 ? 80 : 50,
+        latency: "~1 block",
+        icon: "🔄",
+        color: "orange",
+        specialty: `Multi-Oracle Sync • ${hoursStale < 1 ? "Live" : `${hoursStale.toFixed(1)}h ago`}`,
+      });
+    } catch {
+      oracleData.push({
+        name: "SyncedFeed",
+        type: "first-party",
+        price: 0,
+        timestamp: 0,
+        status: "error",
+        reliability: 0,
+        latency: "--",
+        icon: "🔄",
+        color: "orange",
+        specialty: "Multi-Oracle Sync (Offline)",
+      });
     }
 
     setOracles(oracleData);
