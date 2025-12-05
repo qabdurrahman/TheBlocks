@@ -2,22 +2,28 @@
 
 import { useState, useEffect } from "react";
 import type { NextPage } from "next";
+import { ThreeOracleDashboard } from "~~/components/oracle/ThreeOracleDashboard";
 import { FiveOracleDashboard } from "~~/components/oracle/FiveOracleDashboard";
 import { OracleDashboard } from "~~/components/oracle/OracleDashboard";
 import { AttackSimulator } from "~~/components/oracle/AttackSimulator";
 import { SecurityMetrics } from "~~/components/oracle/SecurityMetrics";
-import { LivePriceChart } from "~~/components/oracle/LivePriceChart";
 import { ContractStatus } from "~~/components/oracle/ContractStatus";
 
 /**
- * 🏆 THE BLOCKS - FIVE ORACLE SECURITY DASHBOARD
+ * 🏆 THE BLOCKS - 3-ORACLE BFT SECURITY DASHBOARD
  * TriHacker Tournament 2025 - IIT Bombay
  * 
- * Real-time visualization of our 5-layer oracle security system with
- * AI-powered Smart Oracle Selection: Chainlink • Pyth • API3 • DIA • Uniswap TWAP
+ * Real-time visualization of our 3-layer oracle security system with
+ * AI-powered Smart Oracle Selection: Chainlink • Pyth • API3
+ * 
+ * Features:
+ * - 3-Oracle BFT Consensus (Byzantine Fault Tolerant)
+ * - GuardianOracleV2 Security Layer
+ * - SmartOracleSelector AI Scoring
+ * - Multi-Asset Price Explorer (50+ feeds)
  */
 
-type ViewMode = "dashboard" | "legacy" | "attack" | "metrics" | "contracts";
+type ViewMode = "dashboard" | "legacy5" | "legacy" | "attack" | "metrics" | "contracts";
 
 const OraclePage: NextPage = () => {
   const [activeView, setActiveView] = useState<ViewMode>("dashboard");
@@ -28,11 +34,11 @@ const OraclePage: NextPage = () => {
   }, []);
 
   const views = [
-    { id: "dashboard" as ViewMode, label: "5-Oracle System", icon: "🧠", color: "from-cyan-500 to-blue-500" },
-    { id: "legacy" as ViewMode, label: "Legacy View", icon: "📡", color: "from-gray-500 to-slate-500" },
+    { id: "dashboard" as ViewMode, label: "3-Oracle BFT", icon: "🧠", color: "from-cyan-500 to-blue-500" },
+    { id: "legacy5" as ViewMode, label: "5-Oracle View", icon: "📊", color: "from-purple-500 to-indigo-500" },
     { id: "attack" as ViewMode, label: "Attack Sim", icon: "⚔️", color: "from-red-500 to-orange-500" },
     { id: "metrics" as ViewMode, label: "Security", icon: "🛡️", color: "from-green-500 to-emerald-500" },
-    { id: "contracts" as ViewMode, label: "Contracts", icon: "📜", color: "from-purple-500 to-pink-500" },
+    { id: "contracts" as ViewMode, label: "Contracts", icon: "📜", color: "from-pink-500 to-rose-500" },
   ];
 
   return (
@@ -65,7 +71,7 @@ const OraclePage: NextPage = () => {
                   <h1 className="text-3xl font-black bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
                     THE BLOCKS
                   </h1>
-                  <p className="text-xs text-gray-400 tracking-widest uppercase">Oracle Security System</p>
+                  <p className="text-xs text-gray-400 tracking-widest uppercase">3-Oracle BFT Security System</p>
                 </div>
               </div>
             </div>
@@ -114,7 +120,8 @@ const OraclePage: NextPage = () => {
 
       {/* Main Content */}
       <main className={`relative z-10 container mx-auto px-4 py-8 transition-all duration-1000 delay-400 ${isLoaded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
-        {activeView === "dashboard" && <FiveOracleDashboard />}
+        {activeView === "dashboard" && <ThreeOracleDashboard />}
+        {activeView === "legacy5" && <FiveOracleDashboard />}
         {activeView === "legacy" && <OracleDashboard />}
         {activeView === "attack" && <AttackSimulator />}
         {activeView === "metrics" && <SecurityMetrics />}
