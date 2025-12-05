@@ -151,18 +151,20 @@ export function ThreeOracleDashboard() {
       const updatedAt = Number(data.publishTime);
       const age = now - updatedAt;
       
+      // Pyth on testnet may have stale data - use longer thresholds
+      // Show as live if < 1 hour, stale if < 24 hours, error if > 24 hours
       oracleData.push({
         name: "Pyth Network",
         type: "pull",
         price,
         timestamp: updatedAt,
         confidence: conf,
-        status: age < 300 ? "live" : age < 600 ? "stale" : "error",
-        reliability: 97,
+        status: age < 3600 ? "live" : age < 86400 ? "stale" : "error",
+        reliability: age < 3600 ? 97 : age < 86400 ? 70 : 30,
         latency: "~400ms",
         icon: "🔮",
         color: "purple",
-        specialty: "Sub-second Updates • Trading",
+        specialty: `Sub-second Updates • ${age < 3600 ? "Live" : `${Math.floor(age / 3600)}h stale`}`,
       });
     } catch {
       oracleData.push({
@@ -284,10 +286,15 @@ export function ThreeOracleDashboard() {
         }),
       ]);
 
+      // Contract returns: (price, confidence, twap, isSecure)
+      // securedPrice[0] = price (int256)
+      // securedPrice[1] = confidence (uint8, 0-100)
+      // securedPrice[2] = twap (int256)
+      // securedPrice[3] = isSecure (bool)
       setGuardianStatus({
         price: Number(securedPrice[0]) / 1e8,
-        twapPrice: Number(securedPrice[1]) / 1e8,
-        confidence: Number(securedPrice[2]),
+        twapPrice: Number(securedPrice[2]) / 1e8, // twap is at index 2
+        confidence: Number(securedPrice[1]), // confidence is at index 1 (uint8, 0-100)
         isSecure: securedPrice[3] as boolean,
         circuitBreakerTripped: circuitBreaker as boolean,
         anomalyCount: Number(metrics[4]),
