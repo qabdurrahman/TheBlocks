@@ -37,7 +37,7 @@ const Home: NextPage = () => {
           <div className="flex flex-wrap justify-center gap-3 mt-6">
             <span className="badge badge-lg badge-primary">Fair Ordering</span>
             <span className="badge badge-lg badge-secondary">5 Invariants</span>
-            <span className="badge badge-lg badge-accent">Dual Oracle</span>
+            <span className="badge badge-lg badge-accent">Triple Oracle + AI</span>
             <span className="badge badge-lg badge-info">Partial Finality</span>
             <span className="badge badge-lg badge-warning">MEV Resistant</span>
           </div>
@@ -83,8 +83,8 @@ const Home: NextPage = () => {
             <div className="card bg-base-100 shadow-lg">
               <div className="card-body text-center">
                 <span className="text-4xl mb-2">🔮</span>
-                <h3 className="card-title justify-center">Dual Oracle</h3>
-                <p className="text-sm opacity-70">Chainlink + Band Protocol with manipulation detection</p>
+                <h3 className="card-title justify-center">Triple Oracle + AI</h3>
+                <p className="text-sm opacity-70">Chainlink + Pyth + SyncedFeed with AI-powered manipulation detection</p>
               </div>
             </div>
             <div className="card bg-base-100 shadow-lg">

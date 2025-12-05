@@ -166,7 +166,8 @@ const Dashboard: NextPage = () => {
                 </p>
                 <ul className="text-xs opacity-60 mt-2 space-y-1">
                   <li>✓ FIFO Queue (Fair Ordering)</li>
-                  <li>✓ Dual Oracle (Chainlink + Band)</li>
+                  <li>✓ Triple Oracle (Chainlink + Pyth + Synced)</li>
+                  <li>✓ AI-Powered Security (GuardianOracleV2)</li>
                   <li>✓ 5 Safety Invariants</li>
                   <li>✓ Partial Finality</li>
                   <li>✓ MEV Prevention</li>
