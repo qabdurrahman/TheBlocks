@@ -1,22 +1,34 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {MultiOracleAggregator} from "./MultiOracleAggregator.sol";
+
 /**
  * @title SettlementOracle
  * @author TheBlocks Team - TriHacker Tournament 2025
- * @notice Dual Oracle system with Chainlink primary and Band Protocol fallback
- * @dev Implements oracle manipulation resistance with deviation detection and dispute mechanism
+ * @notice 5-Oracle BFT Aggregation System with Championship-Grade Price Feeds
+ * @dev Integrates with MultiOracleAggregator for Byzantine-fault-tolerant pricing
  * 
- * ARCHITECTURE LAYER: Data Fetching
- * - Chainlink integration (primary oracle)
- * - Band Protocol fallback (secondary oracle)
- * - Price validation logic
+ * ARCHITECTURE LAYER: Data Fetching (UPGRADED)
+ * - MultiOracleAggregator integration (5 oracles)
+ * - Chainlink primary fallback
+ * - Band Protocol secondary fallback
+ * - BFT median aggregation
+ * 
+ * SUPPORTED ORACLES (via MultiOracleAggregator):
+ * 1. Chainlink - Industry standard push oracle
+ * 2. Pyth Network - Sub-second pull oracle
+ * 3. Redstone - Multi-sig threshold oracle
+ * 4. DIA - Community-sourced oracle
+ * 5. Uniswap V3 TWAP - On-chain trustless oracle
  * 
  * SECURITY FEATURES:
- * - Dual oracle architecture (redundancy)
+ * - BFT tolerance: 2/5 oracles can be compromised
+ * - Outlier detection and exclusion
+ * - Circuit breakers with cascading fallback
+ * - Confidence-weighted averaging
  * - Price deviation detection (>5% triggers alert)
- * - Staleness checks (max 60 seconds)
- * - Fallback mechanism on primary failure
+ * - Staleness checks (per-oracle thresholds)
  * 
  * ORACLE FLOW:
  * ┌─────────────────────────────────────────────────────────────────┐
@@ -78,7 +90,11 @@ contract SettlementOracle {
     // STATE VARIABLES
     // ============================================
     
-    // Oracle addresses
+    // MULTI-ORACLE AGGREGATOR (Primary - 5 oracles with BFT)
+    MultiOracleAggregator public multiOracleAggregator;
+    bool public useMultiOracle;  // Toggle between multi-oracle and legacy mode
+    
+    // Oracle addresses (Legacy fallback)
     AggregatorV3Interface public chainlinkOracle;
     IStdReference public bandOracle;
     
@@ -191,8 +207,8 @@ contract SettlementOracle {
     // ============================================
     
     /**
-     * @param _chainlinkOracle Address of Chainlink price feed
-     * @param _bandOracle Address of Band Protocol StdReference
+     * @param _chainlinkOracle Address of Chainlink price feed (fallback)
+     * @param _bandOracle Address of Band Protocol StdReference (fallback)
      */
     constructor(address _chainlinkOracle, address _bandOracle) {
         // For local testing, allow zero addresses
@@ -206,19 +222,64 @@ contract SettlementOracle {
             bandAvailable = true;
         }
     }
+    
+    /**
+     * @notice Set the MultiOracleAggregator for 5-oracle BFT pricing
+     * @param _aggregator Address of the MultiOracleAggregator
+     */
+    function setMultiOracleAggregator(address _aggregator) external {
+        // In production, add access control
+        require(_aggregator != address(0), "Invalid aggregator");
+        multiOracleAggregator = MultiOracleAggregator(_aggregator);
+        useMultiOracle = true;
+    }
+    
+    /**
+     * @notice Toggle between multi-oracle and legacy mode
+     * @param _useMultiOracle True to use 5-oracle aggregator
+     */
+    function setUseMultiOracle(bool _useMultiOracle) external {
+        // In production, add access control
+        require(
+            !_useMultiOracle || address(multiOracleAggregator) != address(0),
+            "Aggregator not configured"
+        );
+        useMultiOracle = _useMultiOracle;
+    }
 
     // ============================================
     // CORE ORACLE FUNCTIONS
     // ============================================
     
     /**
-     * @notice Get latest price from primary oracle (Chainlink)
-     * @dev Falls back to Band Protocol if Chainlink fails
+     * @notice Get latest price from oracles
+     * @dev Uses 5-oracle BFT aggregator if configured, else falls back to dual-oracle
      * @return price The current price (8 decimals)
      * @return timestamp When the price was last updated
      */
     function getLatestPrice() public returns (uint256 price, uint256 timestamp) {
-        // Try Chainlink first
+        // PRIORITY 1: Use MultiOracleAggregator (5 oracles, BFT median)
+        if (useMultiOracle && address(multiOracleAggregator) != address(0)) {
+            try multiOracleAggregator.getAggregatedPrice() returns (
+                MultiOracleAggregator.AggregatedPrice memory aggregated
+            ) {
+                if (aggregated.isReliable && aggregated.medianPrice > 0) {
+                    price = aggregated.medianPrice;
+                    timestamp = aggregated.timestamp;
+                    
+                    _recordPrice(price);
+                    emit PriceUpdated("MultiOracle-BFT", price, timestamp);
+                    
+                    return (price, timestamp);
+                }
+                // Multi-oracle not reliable, fall through to legacy
+            } catch {
+                // Aggregator failed, fall through to legacy mode
+                emit OracleFailure("MultiOracle", "Aggregator call failed");
+            }
+        }
+        
+        // PRIORITY 2: Legacy Chainlink
         if (chainlinkAvailable) {
             try this._getChainlinkPrice() returns (uint256 p, uint256 t) {
                 // Validate freshness
@@ -247,7 +308,7 @@ contract SettlementOracle {
             }
         }
         
-        // Fallback to Band Protocol
+        // PRIORITY 3: Fallback to Band Protocol
         return getFallbackPrice();
     }
     
@@ -461,6 +522,53 @@ contract SettlementOracle {
     }
     
     /**
+     * @notice Get complete oracle system health including multi-oracle aggregator
+     */
+    function getFullOracleHealth() external view returns (
+        bool usingMultiOracle,
+        bool chainlinkHealthy,
+        bool bandHealthy,
+        uint8 activeMultiOracleCount,
+        MultiOracleAggregator.CircuitBreakerLevel circuitLevel,
+        bool systemPaused
+    ) {
+        usingMultiOracle = useMultiOracle && address(multiOracleAggregator) != address(0);
+        chainlinkHealthy = chainlinkAvailable;
+        bandHealthy = bandAvailable;
+        
+        if (usingMultiOracle) {
+            (circuitLevel, systemPaused, activeMultiOracleCount,) = 
+                multiOracleAggregator.getSystemHealth();
+        }
+    }
+    
+    /**
+     * @notice Get latest aggregated price from multi-oracle (view only)
+     */
+    function getMultiOraclePrice() external view returns (
+        uint256 medianPrice,
+        uint256 weightedPrice,
+        uint256 twapPrice,
+        uint256 confidence,
+        uint8 validOracleCount,
+        bool isReliable
+    ) {
+        if (address(multiOracleAggregator) != address(0)) {
+            MultiOracleAggregator.AggregatedPrice memory latest = 
+                multiOracleAggregator.getLatestPrice();
+            
+            return (
+                latest.medianPrice,
+                latest.weightedPrice,
+                latest.twapPrice,
+                latest.confidence,
+                latest.validOracleCount,
+                latest.isReliable
+            );
+        }
+    }
+    
+    /**
      * @notice Get price history
      */
     function getPriceHistory() external view returns (uint256[] memory) {
@@ -523,22 +631,48 @@ contract SettlementOracle {
     
     /**
      * @notice Get validated price for a specific settlement
-     * @dev Tries Chainlink first, falls back to Band, validates bounds
+     * @dev Uses 5-oracle BFT aggregator if configured, else dual-oracle fallback
      * @param settlementId The settlement requesting price
      * @return price The validated price
-     * @return source Which oracle provided it (0=Chainlink, 1=Band)
+     * @return source Which oracle provided it (0=Chainlink, 1=Band, 2=MultiOracle)
      * @return isValid Whether price passed all validation checks
      * 
      * INVARIANT: Price must be:
      * 1. Fresh (< 60 seconds old)
      * 2. Within bounds ($1 - $100,000)
      * 3. Not showing manipulation patterns
+     * 4. Pass BFT consensus (if using MultiOracle)
      */
     function getValidatedPriceForSettlement(uint256 settlementId)
         external
         returns (uint256 price, uint8 source, bool isValid)
     {
-        // STEP 1: Try Chainlink first
+        // PRIORITY 1: Use MultiOracleAggregator (5 oracles, BFT median)
+        if (useMultiOracle && address(multiOracleAggregator) != address(0)) {
+            try multiOracleAggregator.getAggregatedPrice() returns (
+                MultiOracleAggregator.AggregatedPrice memory aggregated
+            ) {
+                if (aggregated.isReliable && 
+                    aggregated.medianPrice > 0 && 
+                    _isPriceWithinBounds(aggregated.medianPrice)) {
+                    
+                    price = aggregated.medianPrice;
+                    source = 2; // MultiOracle source
+                    isValid = true;
+                    
+                    _recordSettlementPrice(settlementId, price, source);
+                    _recordPrice(price);
+                    
+                    emit SettlementPriceValidated(settlementId, price, source, aggregated.timestamp);
+                    return (price, source, isValid);
+                }
+                // Multi-oracle not reliable, fall through to legacy
+            } catch {
+                emit OracleFailure("MultiOracle", "Settlement price fetch failed");
+            }
+        }
+        
+        // PRIORITY 2: Try Chainlink
         if (chainlinkAvailable) {
             try this._getChainlinkPrice() returns (uint256 p, uint256 t) {
                 if (_isPriceFresh(t) && _isPriceWithinBounds(p)) {

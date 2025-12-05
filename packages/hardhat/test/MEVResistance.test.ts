@@ -2,7 +2,7 @@ import { expect } from "chai";
 import { ethers } from "hardhat";
 import { SettlementProtocol } from "../typechain-types";
 import { SignerWithAddress } from "@nomicfoundation/hardhat-ethers/signers";
-import { mine } from "@nomicfoundation/hardhat-network-helpers";
+import { mine, time } from "@nomicfoundation/hardhat-network-helpers";
 
 /**
  * MEV Resistance & Enhanced Security Tests
@@ -41,7 +41,7 @@ describe("MEV Resistance & Enhanced Security", function () {
 
   describe("1. Commit-Reveal MEV Prevention", function () {
     it("1.1 Should commit encrypted settlement", async function () {
-      const deadline = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+      const deadline = BigInt(await time.latest()) + 3600n; // 1 hour from now (relative to chain time)
       const salt = ethers.randomBytes(32);
       const nonce = await protocol.userNonces(user1.address);
 
@@ -62,7 +62,7 @@ describe("MEV Resistance & Enhanced Security", function () {
     });
 
     it("1.2 Should reject duplicate commitment", async function () {
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const deadline = BigInt(await time.latest()) + 3600n;
       const salt = ethers.randomBytes(32);
       const nonce = await protocol.userNonces(user1.address);
 
@@ -76,7 +76,7 @@ describe("MEV Resistance & Enhanced Security", function () {
     });
 
     it("1.3 Should reveal settlement after delay", async function () {
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const deadline = BigInt(await time.latest()) + 3600n;
       const salt = ethers.hexlify(ethers.randomBytes(32));
       const nonce = await protocol.userNonces(user1.address);
       const chainId = (await ethers.provider.getNetwork()).chainId;
@@ -101,7 +101,7 @@ describe("MEV Resistance & Enhanced Security", function () {
     });
 
     it("1.4 Should reject early reveal (MEV prevention)", async function () {
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const deadline = BigInt(await time.latest()) + 3600n;
       const salt = ethers.hexlify(ethers.randomBytes(32));
       const nonce = await protocol.userNonces(user1.address);
       const chainId = (await ethers.provider.getNetwork()).chainId;
@@ -120,7 +120,7 @@ describe("MEV Resistance & Enhanced Security", function () {
     });
 
     it("1.5 Should reject reveal with wrong nonce (replay protection)", async function () {
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const deadline = BigInt(await time.latest()) + 3600n;
       const salt = ethers.hexlify(ethers.randomBytes(32));
       const wrongNonce = 999n;
       const chainId = (await ethers.provider.getNetwork()).chainId;
@@ -143,7 +143,7 @@ describe("MEV Resistance & Enhanced Security", function () {
     });
 
     it("1.6 Should increment nonce after reveal", async function () {
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const deadline = BigInt(await time.latest()) + 3600n;
       const salt = ethers.hexlify(ethers.randomBytes(32));
       const nonceBefore = await protocol.userNonces(user1.address);
       const chainId = (await ethers.provider.getNetwork()).chainId;
@@ -444,7 +444,7 @@ describe("MEV Resistance & Enhanced Security", function () {
     });
 
     it("5.2 Should compute commitment hash with chainId", async function () {
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const deadline = BigInt(await time.latest()) + 3600n;
       const salt = ethers.randomBytes(32);
       const nonce = 0n;
 
@@ -465,7 +465,7 @@ describe("MEV Resistance & Enhanced Security", function () {
     it("6.1 Should track pending reveals count", async function () {
       const countBefore = await protocol.getPendingRevealsCount();
 
-      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const deadline = BigInt(await time.latest()) + 3600n;
       const salt = ethers.hexlify(ethers.randomBytes(32));
       const nonce = await protocol.userNonces(user1.address);
       const chainId = (await ethers.provider.getNetwork()).chainId;
