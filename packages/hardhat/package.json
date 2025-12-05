@@ -22,14 +22,18 @@
     "verify": "hardhat etherscan-verify"
   },
   "dependencies": {
+    "@chainlink/contracts": "^1.5.0",
     "@inquirer/password": "^4.0.2",
     "@openzeppelin/contracts": "~5.0.2",
+    "@pythnetwork/pyth-sdk-solidity": "^4.3.1",
+    "@redstone-finance/evm-connector": "^0.9.0",
     "@typechain/ethers-v6": "~0.5.1",
     "dotenv": "~16.4.5",
     "envfile": "~7.1.0",
     "qrcode": "~1.5.4"
   },
   "devDependencies": {
+    "@api3/contracts": "^32.0.1",
     "@ethersproject/abi": "~5.7.0",
     "@ethersproject/providers": "~5.7.2",
     "@nomicfoundation/hardhat-chai-matchers": "~2.0.7",
