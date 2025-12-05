@@ -13,6 +13,7 @@ import {
   SMART_ORACLE_SELECTOR_ABI,
   GUARDIAN_ORACLE_V2_ABI,
   API3_ADAPTER_ABI,
+  SYNCED_PRICE_FEED_ABI,
   type ChainlinkFeedKey,
   type PythFeedKey,
 } from "~~/config/priceFeeds";
@@ -69,6 +70,13 @@ interface MultiAssetPrice {
   status: "live" | "stale" | "error";
 }
 
+interface SmartSelectorContractData {
+  aggregatedPrice: number;
+  confidence: number;
+  useCase: number;
+  timestamp: number;
+}
+
 // ========================================
 // MAIN COMPONENT
 // ========================================
@@ -82,6 +90,7 @@ export function ThreeOracleDashboard() {
   const [multiAssetPrices, setMultiAssetPrices] = useState<MultiAssetPrice[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>("crypto");
   const [isLive, setIsLive] = useState(true);
+  const [smartSelectorContract, setSmartSelectorContract] = useState<SmartSelectorContractData | null>(null);
 
   // Fetch all 3 oracle prices for ETH/USD
   const fetchOraclePrices = useCallback(async () => {
@@ -253,6 +262,28 @@ export function ThreeOracleDashboard() {
     }
   }, []);
 
+  // Fetch SmartOracleSelector contract data (last selection)
+  const fetchSmartSelectorData = useCallback(async () => {
+    try {
+      const lastSelection = await sepoliaClient.readContract({
+        address: CONTRACTS.smartOracleSelector as `0x${string}`,
+        abi: SMART_ORACLE_SELECTOR_ABI,
+        functionName: "lastSelection",
+      });
+      
+      const [aggregatedPrice, confidence, useCase, timestamp] = lastSelection as [bigint, bigint, number, bigint];
+      
+      setSmartSelectorContract({
+        aggregatedPrice: Number(aggregatedPrice) / 1e8,
+        confidence: Number(confidence),
+        useCase,
+        timestamp: Number(timestamp),
+      });
+    } catch (e) {
+      console.error("Failed to fetch smart selector data:", e);
+    }
+  }, []);
+
   // Fetch multi-asset prices (comprehensive)
   const fetchMultiAssetPrices = useCallback(async () => {
     const assets = ASSET_CATEGORIES[selectedCategory as keyof typeof ASSET_CATEGORIES]?.assets || [];
@@ -395,14 +426,16 @@ export function ThreeOracleDashboard() {
   useEffect(() => {
     fetchOraclePrices();
     fetchGuardianStatus();
+    fetchSmartSelectorData();
     const interval = setInterval(() => {
       if (isLive) {
         fetchOraclePrices();
         fetchGuardianStatus();
+        fetchSmartSelectorData();
       }
     }, 10000);
     return () => clearInterval(interval);
-  }, [fetchOraclePrices, fetchGuardianStatus, isLive]);
+  }, [fetchOraclePrices, fetchGuardianStatus, fetchSmartSelectorData, isLive]);
 
   useEffect(() => {
     fetchMultiAssetPrices();
@@ -427,7 +460,7 @@ export function ThreeOracleDashboard() {
   return (
     <div className="space-y-8">
       {/* Header Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <StatsCard
           title="Active Oracles"
           value={`${liveCount}/3`}
@@ -436,18 +469,25 @@ export function ThreeOracleDashboard() {
           color="cyan"
         />
         <StatsCard
-          title="Smart Selection"
-          value={selectedUseCase}
-          subtitle="AI-powered oracle ranking"
-          icon="🧠"
-          color="purple"
+          title="Smart Selector"
+          value={smartSelectorContract?.timestamp ? "LIVE" : "READY"}
+          subtitle="On-chain AI scoring"
+          icon="🤖"
+          color="blue"
         />
         <StatsCard
-          title="Guardian Security"
+          title="Guardian Status"
           value={guardianStatus?.isSecure ? "SECURE" : "CHECK"}
           subtitle={`Confidence: ${guardianStatus?.confidence || "--"}%`}
           icon="🛡️"
           color="green"
+        />
+        <StatsCard
+          title="On-Chain Price"
+          value={smartSelectorContract ? formatPrice(smartSelectorContract.aggregatedPrice) : "--"}
+          subtitle="SmartOracleSelector"
+          icon="⛓️"
+          color="purple"
         />
         <StatsCard
           title="BFT Price"
@@ -588,6 +628,51 @@ export function ThreeOracleDashboard() {
                 <p className="text-xs text-gray-500">Volatility Index</p>
                 <p>{guardianStatus.volatilityIndex}</p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SmartOracleSelector Contract Data */}
+      {smartSelectorContract && smartSelectorContract.timestamp > 0 && (
+        <div className="relative group">
+          <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-300" />
+          <div className="relative bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+            <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+              <span>🤖</span> SmartOracleSelector - On-Chain AI Scoring
+              <span className="ml-auto text-xs px-2 py-1 bg-indigo-500/20 text-indigo-300 rounded-full">
+                Contract: {CONTRACTS.smartOracleSelector.slice(0, 10)}...
+              </span>
+            </h3>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-white/5 rounded-xl p-4">
+                <p className="text-gray-400 text-sm">Last Aggregated Price</p>
+                <p className="text-xl font-bold text-blue-400">{formatPrice(smartSelectorContract.aggregatedPrice)}</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4">
+                <p className="text-gray-400 text-sm">On-Chain Confidence</p>
+                <p className="text-xl font-bold text-purple-400">{smartSelectorContract.confidence}%</p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4">
+                <p className="text-gray-400 text-sm">Use Case Mode</p>
+                <p className="text-xl font-bold text-indigo-400">
+                  {["BALANCED", "SETTLEMENT", "TRADING", "SECURITY"][smartSelectorContract.useCase] || "CUSTOM"}
+                </p>
+              </div>
+              <div className="bg-white/5 rounded-xl p-4">
+                <p className="text-gray-400 text-sm">Last Selection</p>
+                <p className="text-xl font-bold text-cyan-400">
+                  {new Date(smartSelectorContract.timestamp * 1000).toLocaleTimeString()}
+                </p>
+              </div>
+            </div>
+            
+            <div className="mt-4 p-3 bg-gradient-to-r from-indigo-500/10 to-purple-500/10 border border-indigo-500/30 rounded-lg">
+              <p className="text-sm text-gray-300">
+                <span className="text-indigo-400 font-semibold">ℹ️ Live Contract:</span> This data is read directly from the SmartOracleSelector contract 
+                at <code className="text-xs bg-black/30 px-2 py-1 rounded">{CONTRACTS.smartOracleSelector}</code>
+              </p>
             </div>
           </div>
         </div>

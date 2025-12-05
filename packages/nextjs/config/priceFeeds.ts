@@ -113,10 +113,12 @@ export const API3_PROXIES = {
 // DEPLOYED CONTRACTS (SEPOLIA)
 // ========================================
 export const CONTRACTS = {
-  // Our Custom Contracts
+  // Our Custom Contracts - Intelligent Oracle System
   smartOracleSelector: "0x5F5B889E33f923dc34A6Eb9f5E7C7Db0FA3FF6A7",
   guardianOracleV2: "0x71027655D76832eA3d1F056C528485ddE1aec66a",
   api3Adapter: "0x21A9B38759414a12Aa6f6503345D6E0194eeD9eD",
+  syncedPriceFeed: "0xa372663b57Ea5FA52c911FE81aa4B54b87AB6c96",
+  multiOracleAggregator: "0x04b8dD0B1DabC4719a1cD8Ec2628425406F00A1C",
   attackSimulator: "0x5FFFeAf6B0b4d1685809959cA4B16E374827a8e2",
   
   // External Oracle Contracts
@@ -374,6 +376,60 @@ export const API3_ADAPTER_ABI = [
       { name: "price", type: "int256" },
       { name: "timestamp", type: "uint256" },
     ],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
+
+// SyncedPriceFeed ABI (multi-oracle aggregator with sync capability)
+export const SYNCED_PRICE_FEED_ABI = [
+  {
+    inputs: [],
+    name: "getAggregatedPrice",
+    outputs: [
+      { name: "price", type: "int256" },
+      { name: "timestamp", type: "uint256" },
+      { name: "sources", type: "uint8" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "latestRoundData",
+    outputs: [
+      { name: "roundId", type: "uint80" },
+      { name: "answer", type: "int256" },
+      { name: "startedAt", type: "uint256" },
+      { name: "updatedAt", type: "uint256" },
+      { name: "answeredInRound", type: "uint80" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "getLatestPrices",
+    outputs: [
+      { name: "chainlinkPrice", type: "int256" },
+      { name: "pythPrice", type: "int256" },
+      { name: "api3Price", type: "int256" },
+      { name: "timestamps", type: "uint256[3]" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "syncAllPrices",
+    outputs: [],
+    stateMutability: "nonpayable",
+    type: "function",
+  },
+  {
+    inputs: [],
+    name: "getSourceCount",
+    outputs: [{ name: "", type: "uint8" }],
     stateMutability: "view",
     type: "function",
   },

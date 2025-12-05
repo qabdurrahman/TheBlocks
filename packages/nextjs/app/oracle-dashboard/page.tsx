@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import type { NextPage } from "next";
 import { ThreeOracleDashboard } from "~~/components/oracle/ThreeOracleDashboard";
-import { FiveOracleDashboard } from "~~/components/oracle/FiveOracleDashboard";
 import { OracleDashboard } from "~~/components/oracle/OracleDashboard";
 import { AttackSimulator } from "~~/components/oracle/AttackSimulator";
 import { SecurityMetrics } from "~~/components/oracle/SecurityMetrics";
@@ -23,7 +22,7 @@ import { ContractStatus } from "~~/components/oracle/ContractStatus";
  * - Multi-Asset Price Explorer (50+ feeds)
  */
 
-type ViewMode = "dashboard" | "legacy5" | "legacy" | "attack" | "metrics" | "contracts";
+type ViewMode = "dashboard" | "attack" | "metrics" | "contracts";
 
 const OraclePage: NextPage = () => {
   const [activeView, setActiveView] = useState<ViewMode>("dashboard");
@@ -34,8 +33,7 @@ const OraclePage: NextPage = () => {
   }, []);
 
   const views = [
-    { id: "dashboard" as ViewMode, label: "3-Oracle BFT", icon: "🧠", color: "from-cyan-500 to-blue-500" },
-    { id: "legacy5" as ViewMode, label: "5-Oracle View", icon: "📊", color: "from-purple-500 to-indigo-500" },
+    { id: "dashboard" as ViewMode, label: "3-Oracle BFT + AI", icon: "🧠", color: "from-cyan-500 to-blue-500" },
     { id: "attack" as ViewMode, label: "Attack Sim", icon: "⚔️", color: "from-red-500 to-orange-500" },
     { id: "metrics" as ViewMode, label: "Security", icon: "🛡️", color: "from-green-500 to-emerald-500" },
     { id: "contracts" as ViewMode, label: "Contracts", icon: "📜", color: "from-pink-500 to-rose-500" },
@@ -121,8 +119,6 @@ const OraclePage: NextPage = () => {
       {/* Main Content */}
       <main className={`relative z-10 container mx-auto px-4 py-8 transition-all duration-1000 delay-400 ${isLoaded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
         {activeView === "dashboard" && <ThreeOracleDashboard />}
-        {activeView === "legacy5" && <FiveOracleDashboard />}
-        {activeView === "legacy" && <OracleDashboard />}
         {activeView === "attack" && <AttackSimulator />}
         {activeView === "metrics" && <SecurityMetrics />}
         {activeView === "contracts" && <ContractStatus />}
