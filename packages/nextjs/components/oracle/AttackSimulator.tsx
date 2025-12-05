@@ -11,7 +11,8 @@ const sepoliaClient = createPublicClient({
 });
 
 const ATTACK_SIMULATOR = "0x5FFFeAf6B0b4d1685809959cA4B16E374827a8e2";
-const GUARDIAN = "0x71027655D76832eA3d1F056C528485ddE1aec66a";
+// Guardian contract address for reference (used by AttackSimulator contract)
+const _GUARDIAN = "0x71027655D76832eA3d1F056C528485ddE1aec66a";
 
 const ATTACK_SIMULATOR_ABI = [
   {

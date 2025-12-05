@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import type { NextPage } from "next";
 import { ThreeOracleDashboard } from "~~/components/oracle/ThreeOracleDashboard";
-import { OracleDashboard } from "~~/components/oracle/OracleDashboard";
 import { AttackSimulator } from "~~/components/oracle/AttackSimulator";
 import { SecurityMetrics } from "~~/components/oracle/SecurityMetrics";
 import { ContractStatus } from "~~/components/oracle/ContractStatus";

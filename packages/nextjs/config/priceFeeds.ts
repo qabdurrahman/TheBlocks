@@ -129,42 +129,41 @@ export const CONTRACTS = {
 
 // ========================================
 // ASSET CATEGORIES FOR UI
+// Only includes assets with REAL Chainlink feeds on Sepolia
 // ========================================
 export const ASSET_CATEGORIES = {
   crypto: {
     label: "Cryptocurrencies",
     icon: "🪙",
-    assets: ["ETH/USD", "BTC/USD", "LINK/USD", "SOL/USD", "AVAX/USD", "MATIC/USD", "XRP/USD", "ADA/USD", "DOT/USD"],
+    // Only assets with verified Chainlink Sepolia feeds
+    assets: ["ETH/USD", "BTC/USD", "LINK/USD"],
   },
   defi: {
     label: "DeFi Tokens",
     icon: "🔷",
-    assets: ["UNI/USD", "AAVE/USD", "MKR/USD", "COMP/USD", "CRV/USD", "SNX/USD", "LDO/USD", "GRT/USD"],
-  },
-  layer2: {
-    label: "Layer 2 & New Chains",
-    icon: "⚡",
-    assets: ["ARB/USD", "OP/USD", "APT/USD", "SUI/USD", "SEI/USD", "STRK/USD", "INJ/USD", "TIA/USD"],
-  },
-  meme: {
-    label: "Meme Coins",
-    icon: "🐕",
-    assets: ["DOGE/USD", "SHIB/USD", "PEPE/USD", "BONK/USD", "WIF/USD", "MEME/USD"],
+    // SNX, CRV have Sepolia feeds
+    assets: ["SNX/USD", "CRV/USD", "DAI/USD", "USDC/USD"],
   },
   stablecoins: {
     label: "Stablecoins",
     icon: "💵",
-    assets: ["USDC/USD", "USDT/USD", "DAI/USD"],
+    assets: ["DAI/USD", "USDC/USD", "GHO/USD"],
   },
   forex: {
     label: "Forex",
     icon: "💱",
-    assets: ["EUR/USD", "GBP/USD", "JPY/USD", "AUD/USD", "CAD/USD", "CHF/USD"],
+    // EUR, GBP, JPY have Sepolia feeds
+    assets: ["EUR/USD", "GBP/USD", "JPY/USD"],
   },
   commodities: {
     label: "Commodities",
     icon: "🥇",
-    assets: ["XAU/USD", "XAG/USD"],
+    assets: ["XAU/USD"],
+  },
+  other: {
+    label: "Other Assets",
+    icon: "📊",
+    assets: ["FORTH/USD", "ETH/BTC"],
   },
 } as const;
 
