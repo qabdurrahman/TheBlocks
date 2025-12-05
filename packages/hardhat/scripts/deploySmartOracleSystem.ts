@@ -26,8 +26,8 @@ const SEPOLIA_ADDRESSES = {
   // DIA Oracle V2 on Sepolia
   DIA_ORACLE: "0xa93546947f3015c986695750b8bbEa8e26D65856",
   
-  // Uniswap V3 ETH/USDC Pool on Sepolia
-  UNISWAP_V3_POOL: "0x6ce0896eae6d4bd668fde41bb784548fb8a68e50",
+  // Uniswap V3 USDC/WETH Pool on Sepolia (from GeckoTerminal)
+  UNISWAP_V3_POOL: "0x3289680dd4d6c10bb19b899729cda5eef58aeff1",
   
   // API3 - Note: You need to get proxy address from https://market.api3.org/ethereum-sepolia-testnet
   // For now we'll use the API3 Server V1 approach
@@ -108,14 +108,26 @@ async function main() {
   
   try {
     const TWAPAdapter = await ethers.getContractFactory("UniswapV3TWAPAdapter");
+    // Deploy without pool - configure later to avoid constructor failures
     const twapAdapter = await TWAPAdapter.deploy(
-      SEPOLIA_ADDRESSES.UNISWAP_V3_POOL,
+      ethers.ZeroAddress, // Deploy without pool first
       EXISTING_CONTRACTS.MULTI_ORACLE_AGGREGATOR
     );
     await twapAdapter.waitForDeployment();
     
     deployedContracts.UniswapV3TWAPAdapter = await twapAdapter.getAddress();
     console.log(`   ✅ UniswapV3TWAPAdapter deployed at: ${deployedContracts.UniswapV3TWAPAdapter}`);
+    
+    // Try to configure the pool after deployment
+    try {
+      console.log("   🔧 Configuring Uniswap V3 pool...");
+      const tx = await twapAdapter.configurePool(SEPOLIA_ADDRESSES.UNISWAP_V3_POOL);
+      await tx.wait();
+      console.log("   ✅ Pool configured successfully!");
+    } catch (poolError: any) {
+      console.log(`   ⚠️ Pool configuration skipped: ${poolError.message.slice(0, 50)}...`);
+      console.log("   ℹ️  TWAP adapter deployed but needs manual pool configuration");
+    }
   } catch (error: any) {
     console.log(`   ⚠️ UniswapV3TWAPAdapter deployment failed: ${error.message}`);
     deployedContracts.UniswapV3TWAPAdapter = "0x0000000000000000000000000000000000000000";

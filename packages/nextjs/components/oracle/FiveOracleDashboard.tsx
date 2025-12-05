@@ -18,11 +18,12 @@ const CONTRACTS = {
   chainlink: "0x694AA1769357215DE4FAC081bf1f309aDC325306",
   pyth: "0xDd24F84d36BF92C65F92307595335bdFab5Bbd21",
   dia: "0xa93546947f3015c986695750b8bbEa8e26D65856",
-  uniswapV3Pool: "0x6ce0896eae6d4bd668fde41bb784548fb8a68e50", // WETH/USDC
+  uniswapV3Pool: "0x3289680dd4d6c10bb19b899729cda5eef58aeff1", // USDC/WETH on Sepolia
   
   // New Adapters (Deployed)
   api3Adapter: "0x21A9B38759414a12Aa6f6503345D6E0194eeD9eD",
   diaAdapter: "0x5a9e0cC4DE88E6c798eF53660B91040B75B39b71",
+  twapAdapter: "0x10bBce345F567f4318Ca1925009123Bcd2012acd",
   
   // Aggregator contracts
   guardian: "0x71027655D76832eA3d1F056C528485ddE1aec66a",
