@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPublicClient, http } from "viem";
 import { sepolia } from "viem/chains";
 
@@ -11,7 +11,7 @@ const sepoliaClient = createPublicClient({
 });
 
 const GUARDIAN = "0x71027655D76832eA3d1F056C528485ddE1aec66a";
-const AGGREGATOR = "0x04b8dD0B1DabC4719a1cD8Ec2628425406F00A1C";
+// const AGGREGATOR = "0x04b8dD0B1DabC4719a1cD8Ec2628425406F00A1C";
 
 const GUARDIAN_ABI = [
   {
@@ -88,6 +88,7 @@ export function SecurityMetrics() {
   const [circuitBreaker, setCircuitBreaker] = useState<CircuitBreaker | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedAsset, setSelectedAsset] = useState("ETH/USD");
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   const fetchMetrics = async () => {
     try {
@@ -98,7 +99,7 @@ export function SecurityMetrics() {
         functionName: "getMetrics",
         args: [selectedAsset],
       });
-      
+
       setMetrics({
         totalQueries: Number(metricsData.totalQueries),
         attacksBlocked: Number(metricsData.attacksBlocked),
@@ -106,15 +107,17 @@ export function SecurityMetrics() {
         lastUpdateTime: Number(metricsData.lastUpdateTime),
         volatilityScore: Number(metricsData.volatilityScore),
       });
-    } catch (e) {
-      // Use demo data
+      setIsDemoMode(false);
+    } catch {
+      // Use demo data - be transparent about it
       setMetrics({
-        totalQueries: 1247,
-        attacksBlocked: 23,
-        avgConfidence: 88,
-        lastUpdateTime: Math.floor(Date.now() / 1000) - 30,
-        volatilityScore: 15,
+        totalQueries: 0,
+        attacksBlocked: 0,
+        avgConfidence: 0,
+        lastUpdateTime: Math.floor(Date.now() / 1000),
+        volatilityScore: 0,
       });
+      setIsDemoMode(true);
     }
 
     try {
@@ -125,7 +128,7 @@ export function SecurityMetrics() {
         functionName: "getConfidenceBreakdown",
         args: [selectedAsset],
       });
-      
+
       setConfidence({
         oracleAgreement: Number(confData[0]),
         freshnessScore: Number(confData[1]),
@@ -133,7 +136,7 @@ export function SecurityMetrics() {
         twapDeviation: Number(confData[3]),
         totalConfidence: Number(confData[4]),
       });
-    } catch (e) {
+    } catch {
       setConfidence({
         oracleAgreement: 90,
         freshnessScore: 95,
@@ -151,14 +154,14 @@ export function SecurityMetrics() {
         functionName: "getCircuitBreakerStatus",
         args: [selectedAsset],
       });
-      
+
       setCircuitBreaker({
         isTripped: cbData[0],
         tripTime: Number(cbData[1]),
         reason: cbData[2],
         lastValidPrice: Number(cbData[3]) / 1e8,
       });
-    } catch (e) {
+    } catch {
       setCircuitBreaker({
         isTripped: false,
         tripTime: 0,
@@ -174,6 +177,7 @@ export function SecurityMetrics() {
     fetchMetrics();
     const interval = setInterval(fetchMetrics, 15000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAsset]);
 
   const getScoreColor = (score: number) => {
@@ -190,14 +194,33 @@ export function SecurityMetrics() {
 
   return (
     <div className="space-y-8">
+      {/* Demo Mode Banner */}
+      {isDemoMode && (
+        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 flex items-center gap-3">
+          <span className="text-2xl">⚠️</span>
+          <div>
+            <p className="font-medium text-yellow-300">Contract Not Connected</p>
+            <p className="text-sm text-yellow-300/70">
+              GuardianOracleV2 metrics unavailable. Stats show 0 because no real attacks have been encountered yet. The
+              attack counters will increment when actual manipulation attempts occur.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Asset Selector */}
       <div className="flex items-center justify-between">
         <h3 className="font-bold text-xl flex items-center gap-2">
           <span>🔒</span> Security Metrics
+          {isDemoMode && (
+            <span className="text-xs px-2 py-0.5 bg-yellow-500/20 text-yellow-300 rounded-full">
+              Live - No Attacks Yet
+            </span>
+          )}
         </h3>
         <select
           value={selectedAsset}
-          onChange={(e) => setSelectedAsset(e.target.value)}
+          onChange={e => setSelectedAsset(e.target.value)}
           className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
         >
           <option value="ETH/USD">ETH/USD</option>
@@ -208,7 +231,9 @@ export function SecurityMetrics() {
 
       {/* Main Confidence Score */}
       <div className="relative group">
-        <div className={`absolute -inset-0.5 bg-gradient-to-r ${confidence ? getScoreGradient(confidence.totalConfidence) : 'from-gray-600 to-gray-700'} rounded-3xl blur opacity-40 group-hover:opacity-60 transition duration-300`} />
+        <div
+          className={`absolute -inset-0.5 bg-gradient-to-r ${confidence ? getScoreGradient(confidence.totalConfidence) : "from-gray-600 to-gray-700"} rounded-3xl blur opacity-40 group-hover:opacity-60 transition duration-300`}
+        />
         <div className="relative bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-3xl p-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
             {/* Score Circle */}
@@ -242,7 +267,9 @@ export function SecurityMetrics() {
                 </defs>
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
-                <span className={`text-4xl font-bold ${confidence ? getScoreColor(confidence.totalConfidence) : 'text-gray-400'}`}>
+                <span
+                  className={`text-4xl font-bold ${confidence ? getScoreColor(confidence.totalConfidence) : "text-gray-400"}`}
+                >
                   {loading ? "--" : confidence?.totalConfidence || 0}
                 </span>
                 <span className="text-sm text-gray-400">/100</span>
@@ -253,7 +280,12 @@ export function SecurityMetrics() {
             <div className="flex-1 space-y-4 w-full">
               <ScoreBar label="Oracle Agreement" value={confidence?.oracleAgreement || 0} icon="🔗" loading={loading} />
               <ScoreBar label="Data Freshness" value={confidence?.freshnessScore || 0} icon="⏱️" loading={loading} />
-              <ScoreBar label="Volatility Control" value={confidence?.volatilityScore || 0} icon="📊" loading={loading} />
+              <ScoreBar
+                label="Volatility Control"
+                value={confidence?.volatilityScore || 0}
+                icon="📊"
+                loading={loading}
+              />
               <ScoreBar label="TWAP Alignment" value={confidence?.twapDeviation || 0} icon="📈" loading={loading} />
             </div>
           </div>
@@ -262,29 +294,33 @@ export function SecurityMetrics() {
 
       {/* Circuit Breaker Status */}
       <div className="relative group">
-        <div className={`absolute -inset-0.5 bg-gradient-to-r ${circuitBreaker?.isTripped ? 'from-red-600 to-orange-600' : 'from-green-600 to-cyan-600'} rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-300`} />
+        <div
+          className={`absolute -inset-0.5 bg-gradient-to-r ${circuitBreaker?.isTripped ? "from-red-600 to-orange-600" : "from-green-600 to-cyan-600"} rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-300`}
+        />
         <div className="relative bg-gray-900/90 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
-                circuitBreaker?.isTripped ? 'bg-red-500/20' : 'bg-green-500/20'
-              }`}>
-                <span className="text-3xl">{circuitBreaker?.isTripped ? '🔴' : '🟢'}</span>
+              <div
+                className={`w-16 h-16 rounded-2xl flex items-center justify-center ${
+                  circuitBreaker?.isTripped ? "bg-red-500/20" : "bg-green-500/20"
+                }`}
+              >
+                <span className="text-3xl">{circuitBreaker?.isTripped ? "🔴" : "🟢"}</span>
               </div>
               <div>
                 <h3 className="font-bold text-lg">Circuit Breaker</h3>
-                <p className={`text-sm ${circuitBreaker?.isTripped ? 'text-red-400' : 'text-green-400'}`}>
-                  {circuitBreaker?.isTripped ? `TRIPPED: ${circuitBreaker.reason}` : 'OPERATIONAL'}
+                <p className={`text-sm ${circuitBreaker?.isTripped ? "text-red-400" : "text-green-400"}`}>
+                  {circuitBreaker?.isTripped ? `TRIPPED: ${circuitBreaker.reason}` : "OPERATIONAL"}
                 </p>
               </div>
             </div>
-            
+
             <div className="text-right">
               <p className="text-sm text-gray-400">Threshold</p>
               <p className="text-xl font-mono font-bold">10%</p>
             </div>
           </div>
-          
+
           {circuitBreaker?.isTripped && (
             <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-xl">
               <p className="text-sm text-red-300">
@@ -331,24 +367,9 @@ export function SecurityMetrics() {
           icon="📡"
           color="cyan"
         />
-        <StatCard
-          title="Attacks Blocked"
-          value={metrics?.attacksBlocked?.toString() || "--"}
-          icon="🛡️"
-          color="green"
-        />
-        <StatCard
-          title="Avg Confidence"
-          value={`${metrics?.avgConfidence || "--"}%`}
-          icon="📈"
-          color="purple"
-        />
-        <StatCard
-          title="Volatility"
-          value={`${metrics?.volatilityScore || "--"}%`}
-          icon="📉"
-          color="orange"
-        />
+        <StatCard title="Attacks Blocked" value={metrics?.attacksBlocked?.toString() || "--"} icon="🛡️" color="green" />
+        <StatCard title="Avg Confidence" value={`${metrics?.avgConfidence || "--"}%`} icon="📈" color="purple" />
+        <StatCard title="Volatility" value={`${metrics?.volatilityScore || "--"}%`} icon="📉" color="orange" />
       </div>
 
       {/* Security Architecture */}
@@ -358,7 +379,7 @@ export function SecurityMetrics() {
           <h3 className="font-bold text-lg mb-6 flex items-center gap-2">
             <span>🏗️</span> 2-Layer Security Architecture
           </h3>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Layer 1 */}
             <div className="p-6 bg-gradient-to-br from-blue-500/10 to-cyan-500/10 border border-blue-500/30 rounded-2xl">
@@ -439,7 +460,13 @@ function ScoreBar({ label, value, icon, loading }: { label: string; value: numbe
   );
 }
 
-function ProtectionCard({ title, description, icon, status, value }: {
+function ProtectionCard({
+  title,
+  description,
+  icon,
+  status,
+  value,
+}: {
   title: string;
   description: string;
   icon: string;
@@ -447,18 +474,18 @@ function ProtectionCard({ title, description, icon, status, value }: {
   value: string;
 }) {
   return (
-    <div className={`p-5 rounded-2xl border ${
-      status === "active" 
-        ? "bg-green-500/10 border-green-500/30" 
-        : "bg-gray-500/10 border-gray-500/30"
-    }`}>
+    <div
+      className={`p-5 rounded-2xl border ${
+        status === "active" ? "bg-green-500/10 border-green-500/30" : "bg-gray-500/10 border-gray-500/30"
+      }`}
+    >
       <div className="flex items-start justify-between">
         <span className="text-2xl">{icon}</span>
-        <span className={`text-xs px-2 py-1 rounded-full ${
-          status === "active" 
-            ? "bg-green-500/20 text-green-400" 
-            : "bg-gray-500/20 text-gray-400"
-        }`}>
+        <span
+          className={`text-xs px-2 py-1 rounded-full ${
+            status === "active" ? "bg-green-500/20 text-green-400" : "bg-gray-500/20 text-gray-400"
+          }`}
+        >
           {status === "active" ? "Active" : "Inactive"}
         </span>
       </div>
@@ -469,12 +496,7 @@ function ProtectionCard({ title, description, icon, status, value }: {
   );
 }
 
-function StatCard({ title, value, icon, color }: {
-  title: string;
-  value: string;
-  icon: string;
-  color: string;
-}) {
+function StatCard({ title, value, icon, color }: { title: string; value: string; icon: string; color: string }) {
   const colorClasses: Record<string, string> = {
     cyan: "from-cyan-500/20 to-blue-500/20 border-cyan-500/30",
     green: "from-green-500/20 to-emerald-500/20 border-green-500/30",

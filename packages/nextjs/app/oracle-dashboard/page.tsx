@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { NextPage } from "next";
-import { ThreeOracleDashboard } from "~~/components/oracle/ThreeOracleDashboard";
 import { AttackSimulator } from "~~/components/oracle/AttackSimulator";
-import { SecurityMetrics } from "~~/components/oracle/SecurityMetrics";
 import { ContractStatus } from "~~/components/oracle/ContractStatus";
+import { SecurityMetrics } from "~~/components/oracle/SecurityMetrics";
+import { ThreeOracleDashboard } from "~~/components/oracle/ThreeOracleDashboard";
 
 /**
  * 🏆 THE BLOCKS - 3-ORACLE BFT SECURITY DASHBOARD
  * TriHacker Tournament 2025 - IIT Bombay
- * 
+ *
  * Real-time visualization of our 3-layer oracle security system with
  * AI-powered Smart Oracle Selection: Chainlink • Pyth • API3
- * 
+ *
  * Features:
  * - 3-Oracle BFT Consensus (Byzantine Fault Tolerant)
  * - GuardianOracleV2 Security Layer
@@ -44,14 +44,21 @@ const OraclePage: NextPage = () => {
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl animate-pulse" />
         <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-500/10 rounded-full blur-3xl animate-pulse delay-1000" />
-        <div className="absolute top-1/2 left-1/2 w-64 h-64 bg-blue-500/5 rounded-full blur-2xl animate-bounce" style={{ animationDuration: '4s' }} />
-        
+        <div
+          className="absolute top-1/2 left-1/2 w-64 h-64 bg-blue-500/5 rounded-full blur-2xl animate-bounce"
+          style={{ animationDuration: "4s" }}
+        />
+
         {/* Grid Pattern */}
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSA2MCAwIEwgMCAwIDAgNjAiIGZpbGw9Im5vbmUiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjAzKSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSJ1cmwoI2dyaWQpIi8+PC9zdmc+')] opacity-50" />
       </div>
 
       {/* Header */}
-      <header className={`relative z-10 pt-8 pb-6 transition-all duration-1000 ${isLoaded ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-10'}`}>
+      <header
+        className={`relative z-10 pt-8 pb-6 transition-all duration-1000 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-10"
+        }`}
+      >
         <div className="container mx-auto px-4">
           <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
             {/* Logo & Title */}
@@ -89,26 +96,28 @@ const OraclePage: NextPage = () => {
       </header>
 
       {/* Navigation Tabs */}
-      <nav className={`relative z-10 py-4 transition-all duration-1000 delay-200 ${isLoaded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+      <nav
+        className={`relative z-10 py-4 transition-all duration-1000 delay-200 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
+        }`}
+      >
         <div className="container mx-auto px-4">
           <div className="flex flex-wrap justify-center gap-3">
-            {views.map((view) => (
+            {views.map(view => (
               <button
                 key={view.id}
                 onClick={() => setActiveView(view.id)}
                 className={`group relative px-6 py-3 rounded-xl font-medium transition-all duration-300 ${
                   activeView === view.id
                     ? `bg-gradient-to-r ${view.color} text-white shadow-lg scale-105`
-                    : 'bg-white/5 text-gray-300 hover:bg-white/10 hover:scale-102'
+                    : "bg-white/5 text-gray-300 hover:bg-white/10 hover:scale-102"
                 }`}
               >
                 <span className="flex items-center gap-2">
                   <span className="text-xl">{view.icon}</span>
                   <span>{view.label}</span>
                 </span>
-                {activeView === view.id && (
-                  <div className="absolute inset-0 rounded-xl bg-white/20 animate-pulse" />
-                )}
+                {activeView === view.id && <div className="absolute inset-0 rounded-xl bg-white/20 animate-pulse" />}
               </button>
             ))}
           </div>
@@ -116,7 +125,11 @@ const OraclePage: NextPage = () => {
       </nav>
 
       {/* Main Content */}
-      <main className={`relative z-10 container mx-auto px-4 py-8 transition-all duration-1000 delay-400 ${isLoaded ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}>
+      <main
+        className={`relative z-10 container mx-auto px-4 py-8 transition-all duration-1000 delay-400 ${
+          isLoaded ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"
+        }`}
+      >
         {activeView === "dashboard" && <ThreeOracleDashboard />}
         {activeView === "attack" && <AttackSimulator />}
         {activeView === "metrics" && <SecurityMetrics />}

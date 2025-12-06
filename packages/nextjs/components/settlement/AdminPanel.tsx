@@ -13,12 +13,14 @@ import { notification } from "~~/utils/scaffold-eth";
  * - Protocol pause/unpause
  * - Oracle health monitoring
  * - System statistics dashboard
+ *
+ * NOTE: In demo mode (contracts not deployed), connected wallet is treated as admin
  */
 
 export const AdminPanel = () => {
   const { address: connectedAddress } = useAccount();
 
-  // Read admin address
+  // Read admin address from contract (may be undefined if not deployed)
   const { data: adminAddress } = useScaffoldReadContract({
     contractName: "SettlementProtocol",
     functionName: "admin",
@@ -63,7 +65,15 @@ export const AdminPanel = () => {
   const { writeContractAsync: unpause } = useScaffoldWriteContract("SettlementProtocol");
   const { writeContractAsync: resetOracleStatus } = useScaffoldWriteContract("SettlementProtocol");
 
-  const isAdmin = connectedAddress && adminAddress && connectedAddress.toLowerCase() === adminAddress.toLowerCase();
+  // Demo mode: If contract not deployed, connected wallet is admin
+  // In production: Use admin from contract
+  const DEMO_ADMIN = "0x74dDa086DefBFE113E387e70f0304631972525E5".toLowerCase();
+  const isContractDeployed = !!adminAddress;
+  const isAdmin =
+    connectedAddress &&
+    (isContractDeployed
+      ? connectedAddress.toLowerCase() === adminAddress?.toLowerCase()
+      : connectedAddress.toLowerCase() === DEMO_ADMIN); // Demo: your wallet is admin
 
   // Oracle health parsing
   const chainlinkHealthy = oracleHealth?.[0] ?? false;

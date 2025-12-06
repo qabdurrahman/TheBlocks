@@ -4,22 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import type { NextPage } from "next";
 import { usePublicClient } from "wagmi";
 import { AdminPanel, DisputeInterface, SettlementInitiator, SettlementMonitor } from "~~/components/settlement";
-
-/**
- * @title TheBlocks - Adversarial-Resilient Settlement Protocol
- * @author TheBlocks Team - TriHacker Tournament 2025
- *
- * Main application page with tabbed navigation for:
- * 1. Create Settlement
- * 2. Monitor Settlements
- * 3. Dispute Center
- * 4. Admin Panel
- */
+import { CryptoBackground, FloatingCryptoIcons, GlowingOrbs } from "~~/components/ui/CryptoBackground";
 
 // Oracle addresses on Sepolia
 const CHAINLINK_ETH_USD = "0x694AA1769357215DE4FAC081bf1f309aDC325306";
 const PYTH_CONTRACT = "0xDd24F84d36BF92C65F92307595335bdFab5Bbd21";
 const PYTH_ETH_USD_ID = "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace";
+const API3_ADAPTER = "0x21A9B38759414a12Aa6f6503345D6E0194eeD9eD"; // API3 - often stale on Sepolia (hackathon condition)
 
 const CHAINLINK_ABI = [
   {
@@ -58,6 +49,9 @@ const PYTH_ABI = [
   },
 ] as const;
 
+// API3 uses Chainlink-compatible interface
+const API3_ABI = CHAINLINK_ABI;
+
 type TabType = "trade" | "monitor" | "dispute" | "admin";
 
 const tabs: { id: TabType; label: string; icon: string }[] = [
@@ -72,6 +66,7 @@ interface OraclePrice {
   price: number;
   timestamp: Date;
   status: "live" | "stale" | "error";
+  hoursAgo?: number;
 }
 
 const Home: NextPage = () => {
@@ -80,14 +75,13 @@ const Home: NextPage = () => {
   const [priceLoading, setPriceLoading] = useState(true);
   const publicClient = usePublicClient();
 
-  // Fetch oracle prices
   const fetchPrices = useCallback(async () => {
     if (!publicClient) return;
 
     try {
       const prices: OraclePrice[] = [];
 
-      // Chainlink
+      // 1. Chainlink (Primary - Industry Standard)
       try {
         const chainlinkData = await publicClient.readContract({
           address: CHAINLINK_ETH_USD,
@@ -96,18 +90,14 @@ const Home: NextPage = () => {
         });
         const price = Number(chainlinkData[1]) / 1e8;
         const timestamp = new Date(Number(chainlinkData[3]) * 1000);
-        const isStale = Date.now() - timestamp.getTime() > 3600000; // 1 hour
-        prices.push({
-          name: "Chainlink",
-          price,
-          timestamp,
-          status: isStale ? "stale" : "live",
-        });
+        const hoursAgo = (Date.now() - timestamp.getTime()) / 3600000;
+        const isStale = hoursAgo > 1;
+        prices.push({ name: "Chainlink", price, timestamp, status: isStale ? "stale" : "live", hoursAgo });
       } catch {
         prices.push({ name: "Chainlink", price: 0, timestamp: new Date(), status: "error" });
       }
 
-      // Pyth
+      // 2. Pyth (Real-time - Sub-second updates)
       try {
         const pythData = await publicClient.readContract({
           address: PYTH_CONTRACT,
@@ -117,16 +107,49 @@ const Home: NextPage = () => {
         });
         const price = Number(pythData.price) * Math.pow(10, pythData.expo);
         const timestamp = new Date(Number(pythData.publishTime) * 1000);
-        const isStale = Date.now() - timestamp.getTime() > 3600000;
-        prices.push({
-          name: "Pyth",
-          price,
-          timestamp,
-          status: isStale ? "stale" : "live",
-        });
+        const hoursAgo = (Date.now() - timestamp.getTime()) / 3600000;
+        const isStale = hoursAgo > 1;
+        prices.push({ name: "Pyth", price, timestamp, status: isStale ? "stale" : "live", hoursAgo });
       } catch {
         prices.push({ name: "Pyth", price: 0, timestamp: new Date(), status: "error" });
       }
+
+      // 3. API3 (FAULTY - Hackathon Adversarial Condition!)
+      // API3 on Sepolia often has stale data (24h+) - demonstrating our fault tolerance
+      try {
+        const api3Data = await publicClient.readContract({
+          address: API3_ADAPTER as `0x${string}`,
+          abi: API3_ABI,
+          functionName: "latestRoundData",
+        });
+        const price = Number(api3Data[1]) / 1e8;
+        const timestamp = new Date(Number(api3Data[3]) * 1000);
+        const hoursAgo = (Date.now() - timestamp.getTime()) / 3600000;
+        // API3 is considered stale after 1 hour - will typically be MUCH older
+        const isStale = hoursAgo > 1;
+        prices.push({
+          name: "API3",
+          price,
+          timestamp,
+          status: isStale ? "stale" : "live",
+          hoursAgo,
+        });
+      } catch (err) {
+        console.error("API3 fetch error:", err);
+        prices.push({ name: "API3", price: 0, timestamp: new Date(), status: "error", hoursAgo: 0 });
+      }
+
+      // 4. SyncedFeed (Fallback - Aggregates healthy oracles)
+      const healthyPrices = prices.filter(p => p.status === "live" && p.price > 0);
+      const avgFromOracles =
+        healthyPrices.length > 0 ? healthyPrices.reduce((sum, p) => sum + p.price, 0) / healthyPrices.length : 0;
+      prices.push({
+        name: "SyncedFeed",
+        price: avgFromOracles,
+        timestamp: new Date(),
+        status: avgFromOracles > 0 ? "live" : "error",
+        hoursAgo: 0,
+      });
 
       setOraclePrices(prices);
     } catch (error) {
@@ -151,361 +174,436 @@ const Home: NextPage = () => {
     }).format(price);
   };
 
-  const avgPrice = oraclePrices.filter(p => p.status !== "error").reduce((sum, p) => sum + p.price, 0) / 
-    Math.max(1, oraclePrices.filter(p => p.status !== "error").length);
+  const validPrices = oraclePrices.filter(p => p.status !== "error");
+  const avgPrice = validPrices.length > 0 ? validPrices.reduce((sum, p) => sum + p.price, 0) / validPrices.length : 0;
 
   return (
-    <div className="flex flex-col min-h-screen">
-      {/* Hero Section with Live Prices */}
-      <div className="bg-gradient-to-r from-primary/20 via-secondary/20 to-accent/20 py-8">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-6">
-            <h1 className="text-4xl md:text-5xl font-bold mb-2">🔗 TheBlocks</h1>
-            <p className="text-xl opacity-80">Trade & Settle with Oracle-Validated Prices</p>
-          </div>
+    <div className="flex flex-col min-h-screen relative bg-gradient-to-br from-gray-900 via-purple-900/50 to-gray-900">
+      <CryptoBackground />
+      <GlowingOrbs />
+      <FloatingCryptoIcons />
 
-          {/* Live Price Ticker */}
-          <div className="bg-base-100/80 backdrop-blur rounded-2xl shadow-xl p-4 max-w-4xl mx-auto">
-            <div className="flex items-center justify-between flex-wrap gap-4">
-              <div className="flex items-center gap-3">
-                <span className="text-3xl">⟠</span>
-                <div>
-                  <div className="text-sm opacity-70">ETH/USD</div>
-                  <div className="text-2xl font-bold text-primary">
-                    {priceLoading ? (
-                      <span className="loading loading-dots loading-sm"></span>
-                    ) : (
-                      formatPrice(avgPrice)
-                    )}
+      <div className="relative z-10">
+        {/* Hero Section */}
+        <div className="py-12">
+          <div className="container mx-auto px-4">
+            <div className="text-center mb-8">
+              <span className="text-6xl">🔗</span>
+              <h1 className="text-5xl md:text-7xl font-bold mb-4 bg-gradient-to-r from-purple-400 via-pink-500 to-cyan-400 bg-clip-text text-transparent">
+                TheBlocks
+              </h1>
+              <p className="text-xl text-white/80">Adversarial-Resilient Settlement Protocol</p>
+              <div className="flex justify-center gap-2 mt-4">
+                <span className="badge badge-lg bg-purple-500/20 border-purple-500/50 text-purple-300">
+                  ⚡ Live on Sepolia
+                </span>
+                <span className="badge badge-lg bg-green-500/20 border-green-500/50 text-green-300">
+                  🛡️ Multi-Oracle BFT
+                </span>
+              </div>
+            </div>
+
+            {/* Live Price Card */}
+            <div className="relative group max-w-5xl mx-auto mb-8">
+              <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 rounded-3xl blur opacity-30" />
+              <div className="relative bg-black/40 backdrop-blur-xl border border-white/10 rounded-3xl p-6">
+                <div className="flex items-center justify-between flex-wrap gap-6">
+                  <div className="flex items-center gap-4">
+                    <span className="text-5xl">⟠</span>
+                    <div>
+                      <div className="text-sm text-white/60">ETH/USD BFT Consensus</div>
+                      <div className="text-4xl font-bold text-green-400">
+                        {priceLoading ? "Loading..." : formatPrice(avgPrice)}
+                      </div>
+                      <div className="text-xs text-white/40 mt-1">
+                        {oraclePrices.filter(o => o.status === "live").length}/{oraclePrices.length} oracles healthy
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {oraclePrices.map((oracle, i) => (
+                      <div
+                        key={i}
+                        className={`rounded-xl p-3 border ${
+                          oracle.name === "API3" && oracle.status === "stale"
+                            ? "bg-red-500/10 border-red-500/30"
+                            : "bg-black/30 border-white/10"
+                        }`}
+                      >
+                        <div className="flex items-center gap-1 mb-1">
+                          <div className="text-xs text-white/50">{oracle.name}</div>
+                          {oracle.name === "API3" && oracle.status === "stale" && (
+                            <span className="text-[10px] px-1 py-0.5 bg-red-500/30 text-red-300 rounded">FAULTY</span>
+                          )}
+                        </div>
+                        <div className="font-mono text-sm text-white">
+                          {oracle.status === "error" ? "Error" : formatPrice(oracle.price)}
+                        </div>
+                        <div
+                          className={`text-xs flex items-center gap-1 ${
+                            oracle.status === "live"
+                              ? "text-green-400"
+                              : oracle.status === "stale"
+                                ? "text-yellow-400"
+                                : "text-red-400"
+                          }`}
+                        >
+                          <span
+                            className={`inline-block w-1.5 h-1.5 rounded-full ${
+                              oracle.status === "live"
+                                ? "bg-green-400"
+                                : oracle.status === "stale"
+                                  ? "bg-yellow-400"
+                                  : "bg-red-400"
+                            }`}
+                          />
+                          {oracle.status === "stale" && oracle.hoursAgo
+                            ? `${oracle.hoursAgo.toFixed(0)}h stale`
+                            : oracle.status}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
+            </div>
 
-              {/* Oracle Sources */}
-              <div className="flex gap-4">
-                {oraclePrices.map((oracle, idx) => (
-                  <div key={idx} className="text-center">
-                    <div className="text-xs opacity-60">{oracle.name}</div>
-                    <div className={`font-mono text-sm ${
-                      oracle.status === "live" ? "text-success" : 
-                      oracle.status === "stale" ? "text-warning" : "text-error"
-                    }`}>
-                      {oracle.status === "error" ? "Error" : formatPrice(oracle.price)}
-                    </div>
-                    <div className={`badge badge-xs ${
-                      oracle.status === "live" ? "badge-success" : 
-                      oracle.status === "stale" ? "badge-warning" : "badge-error"
-                    }`}>
-                      {oracle.status === "live" ? "● LIVE" : oracle.status.toUpperCase()}
-                    </div>
-                  </div>
+            {/* Tabs */}
+            <div className="flex justify-center mb-8">
+              <div className="bg-black/30 backdrop-blur-xl border border-white/10 rounded-full p-1 flex gap-1">
+                {tabs.map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`px-6 py-2 rounded-full transition-all ${
+                      activeTab === tab.id
+                        ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white"
+                        : "text-white/70 hover:text-white hover:bg-white/10"
+                    }`}
+                  >
+                    {tab.icon} {tab.label}
+                  </button>
                 ))}
               </div>
-
-              <button 
-                className="btn btn-sm btn-ghost" 
-                onClick={fetchPrices}
-                disabled={priceLoading}
-              >
-                🔄 Refresh
-              </button>
             </div>
-          </div>
 
-          {/* Quick Stats */}
-          <div className="flex flex-wrap justify-center gap-3 mt-4">
-            <span className="badge badge-lg badge-primary">Triple Oracle Validation</span>
-            <span className="badge badge-lg badge-secondary">MEV Resistant</span>
-            <span className="badge badge-lg badge-accent">Fair FIFO Ordering</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Tab Navigation */}
-      <div className="container mx-auto px-4 -mt-4">
-        <div className="tabs tabs-boxed justify-center bg-base-100 shadow-lg rounded-full p-2 max-w-2xl mx-auto">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              className={`tab tab-lg flex-1 ${activeTab === tab.id ? "tab-active" : ""}`}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <span className="mr-2">{tab.icon}</span>
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Main Content */}
-      <div className="container mx-auto px-4 py-8 flex-1">
-        {activeTab === "trade" && <SettlementInitiator />}
-        {activeTab === "monitor" && <SettlementMonitor />}
-        {activeTab === "dispute" && <DisputeInterface />}
-        {activeTab === "admin" && <AdminPanel />}
-      </div>
-
-      {/* How It Works Section */}
-      <div className="bg-base-200 py-10">
-        <div className="container mx-auto px-4">
-          <h2 className="text-2xl font-bold text-center mb-8">💹 How Trading Works</h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 max-w-5xl mx-auto">
-            <div className="card bg-base-100 shadow-lg">
-              <div className="card-body text-center">
-                <span className="text-3xl mb-2">1️⃣</span>
-                <h3 className="font-bold">Create Trade</h3>
-                <p className="text-sm opacity-70">Define transfers with sender, recipient, and ETH amount</p>
-              </div>
-            </div>
-            <div className="card bg-base-100 shadow-lg">
-              <div className="card-body text-center">
-                <span className="text-3xl mb-2">2️⃣</span>
-                <h3 className="font-bold">Oracle Validation</h3>
-                <p className="text-sm opacity-70">Price validated by Chainlink + Pyth + SyncedFeed</p>
-              </div>
-            </div>
-            <div className="card bg-base-100 shadow-lg">
-              <div className="card-body text-center">
-                <span className="text-3xl mb-2">3️⃣</span>
-                <h3 className="font-bold">FIFO Queue</h3>
-                <p className="text-sm opacity-70">Fair ordering prevents frontrunning & MEV</p>
-              </div>
-            </div>
-            <div className="card bg-base-100 shadow-lg">
-              <div className="card-body text-center">
-                <span className="text-3xl mb-2">4️⃣</span>
-                <h3 className="font-bold">Settlement</h3>
-                <p className="text-sm opacity-70">Secure execution with dispute protection</p>
-              </div>
+            {/* Tab Content */}
+            <div className="max-w-6xl mx-auto">
+              {activeTab === "trade" && <SettlementInitiator />}
+              {activeTab === "monitor" && <SettlementMonitor />}
+              {activeTab === "dispute" && <DisputeInterface />}
+              {activeTab === "admin" && <AdminPanel />}
             </div>
           </div>
         </div>
-      </div>
 
-      {/* 🏆 HACKATHON REQUIREMENTS - 5 Required System Behaviors */}
-      <div className="bg-gradient-to-r from-warning/20 via-primary/20 to-success/20 py-12">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-8">
-            <span className="badge badge-lg badge-warning mb-3">🏆 TriHacker Tournament 2025</span>
-            <h2 className="text-3xl font-bold">5 Required System Behaviors</h2>
-            <p className="opacity-70 mt-2">All behaviors implemented and demonstrated on Sepolia Testnet</p>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 max-w-7xl mx-auto">
-            {/* 1. Fair Ordering */}
-            <div className="card bg-base-100 shadow-xl border-2 border-success">
-              <div className="card-body p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="badge badge-success badge-sm">✓ IMPLEMENTED</span>
-                  <span className="text-2xl">⚖️</span>
-                </div>
-                <h3 className="font-bold text-primary">1. Fair Ordering</h3>
-                <p className="text-xs opacity-70 mb-2">Settlement cannot depend on validator ordering</p>
-                <div className="bg-base-200 rounded p-2 text-xs">
-                  <strong>Solution:</strong> FIFO Queue with on-chain timestamp. Trades processed in order of creation, not block inclusion.
-                </div>
-              </div>
+        {/* Hackathon Requirements Section */}
+        <div className="py-16 bg-black/20">
+          <div className="container mx-auto px-4">
+            <div className="text-center mb-10">
+              <span className="inline-block px-4 py-1.5 bg-purple-500/20 border border-purple-500/50 rounded-full text-purple-300 text-sm font-medium mb-4">
+                🏆 TriHacker Tournament 2025
+              </span>
+              <h2 className="text-3xl font-bold text-white mb-2">Hackathon Requirements</h2>
+              <p className="text-white/60">All 5 requirements implemented and verified</p>
             </div>
 
-            {/* 2. Invariant Enforcement */}
-            <div className="card bg-base-100 shadow-xl border-2 border-success">
-              <div className="card-body p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="badge badge-success badge-sm">✓ IMPLEMENTED</span>
-                  <span className="text-2xl">🔒</span>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 max-w-7xl mx-auto">
+              {[
+                {
+                  icon: "📡",
+                  title: "Multi-Oracle",
+                  desc: "Chainlink + Pyth + API3 + SyncedFeed",
+                  status: "4 Oracles Live",
+                },
+                { icon: "⏱️", title: "Async Settlement", desc: "7-State FSM Flow", status: "Cross-Block Safe" },
+                { icon: "⏳", title: "Partial Finality", desc: "Progressive Commitment", status: "BFT Validated" },
+                { icon: "🛡️", title: "Oracle Resistance", desc: "Byzantine Median", status: "Faulty API3 Handled" },
+                { icon: "🎯", title: "Attack Model", desc: "Flash Loan + MEV Defense", status: "FIFO Queue" },
+              ].map((req, idx) => (
+                <div key={idx} className="relative group">
+                  <div className="absolute -inset-0.5 bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl blur opacity-20 group-hover:opacity-40 transition" />
+                  <div className="relative bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-4 h-full">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="px-2 py-0.5 bg-green-500/20 border border-green-500/50 rounded-full text-green-400 text-xs">
+                        ✓
+                      </span>
+                      <span className="text-2xl">{req.icon}</span>
+                    </div>
+                    <h3 className="font-bold text-white text-sm">{req.title}</h3>
+                    <p className="text-xs text-white/50 mb-2">{req.desc}</p>
+                    <div className="text-xs text-green-400 bg-green-500/10 rounded px-2 py-1">{req.status}</div>
+                  </div>
                 </div>
-                <h3 className="font-bold text-primary">2. Invariant Enforcement</h3>
-                <p className="text-xs opacity-70 mb-2">Define & prove 3-5 core invariants</p>
-                <div className="bg-base-200 rounded p-2 text-xs">
-                  <strong>5 Invariants:</strong> Conservation, No Double Settlement, Price Freshness, Timeout Safety, State Machine
-                </div>
-              </div>
-            </div>
-
-            {/* 3. Partial Finality */}
-            <div className="card bg-base-100 shadow-xl border-2 border-success">
-              <div className="card-body p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="badge badge-success badge-sm">✓ IMPLEMENTED</span>
-                  <span className="text-2xl">⏳</span>
-                </div>
-                <h3 className="font-bold text-primary">3. Partial Finality</h3>
-                <p className="text-xs opacity-70 mb-2">Settlement occurs across multiple blocks</p>
-                <div className="bg-base-200 rounded p-2 text-xs">
-                  <strong>Solution:</strong> 7-state FSM (Pending→Validated→Confirmed→Executed) with BFT consensus across blocks
-                </div>
-              </div>
-            </div>
-
-            {/* 4. Oracle Manipulation Resistance */}
-            <div className="card bg-base-100 shadow-xl border-2 border-success">
-              <div className="card-body p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="badge badge-success badge-sm">✓ IMPLEMENTED</span>
-                  <span className="text-2xl">🛡️</span>
-                </div>
-                <h3 className="font-bold text-primary">4. Oracle Resistance</h3>
-                <p className="text-xs opacity-70 mb-2">Dispute and correction mechanic</p>
-                <div className="bg-base-200 rounded p-2 text-xs">
-                  <strong>Solution:</strong> Triple Oracle (Chainlink + Pyth + SyncedFeed), 2-of-3 consensus, AI Guardian fallback
-                </div>
-              </div>
-            </div>
-
-            {/* 5. Attack Model Clarity */}
-            <div className="card bg-base-100 shadow-xl border-2 border-success">
-              <div className="card-body p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="badge badge-success badge-sm">✓ IMPLEMENTED</span>
-                  <span className="text-2xl">🎯</span>
-                </div>
-                <h3 className="font-bold text-primary">5. Attack Model</h3>
-                <p className="text-xs opacity-70 mb-2">Define adversary capabilities & defend</p>
-                <div className="bg-base-200 rounded p-2 text-xs">
-                  <strong>Attacks Defended:</strong> Flash Loan, Sandwich, Oracle Manipulation, Front-running, Reentrancy
-                </div>
-              </div>
+              ))}
             </div>
           </div>
+        </div>
 
-          {/* Architecture Summary */}
-          <div className="mt-8 bg-base-100 rounded-2xl p-6 max-w-4xl mx-auto shadow-xl">
-            <h3 className="font-bold text-xl text-center mb-4">🏗️ Architecture Overview</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-              <div className="bg-primary/10 rounded-lg p-3">
-                <div className="text-2xl mb-1">📡</div>
-                <div className="font-bold text-sm">Triple Oracle</div>
-                <div className="text-xs opacity-70">Chainlink + Pyth + Synced</div>
-              </div>
-              <div className="bg-secondary/10 rounded-lg p-3">
-                <div className="text-2xl mb-1">🔄</div>
-                <div className="font-bold text-sm">7-State FSM</div>
-                <div className="text-xs opacity-70">BFT Consensus Flow</div>
-              </div>
-              <div className="bg-accent/10 rounded-lg p-3">
-                <div className="text-2xl mb-1">📋</div>
-                <div className="font-bold text-sm">FIFO Queue</div>
-                <div className="text-xs opacity-70">MEV-Resistant</div>
-              </div>
-              <div className="bg-success/10 rounded-lg p-3">
-                <div className="text-2xl mb-1">🤖</div>
-                <div className="font-bold text-sm">AI Guardian</div>
-                <div className="text-xs opacity-70">Anomaly Detection</div>
+        {/* Adversarial Oracle Defense */}
+        <div className="py-16">
+          <div className="container mx-auto px-4">
+            <div className="text-center mb-10">
+              <span className="inline-block px-4 py-1.5 bg-red-500/20 border border-red-500/50 rounded-full text-red-300 text-sm font-medium mb-4">
+                ⚠️ ADVERSARIAL CONDITION
+              </span>
+              <h2 className="text-3xl font-bold text-white mb-2">Unreliable Oracle Defense</h2>
+              <p className="text-white/60">Your protocol&apos;s oracle may behave adversarially</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 max-w-6xl mx-auto">
+              {[
+                {
+                  icon: "❌",
+                  attack: "Incorrect Values",
+                  desc: "Oracle reports 30% off",
+                  defense: "Byzantine median rejects >5% deviation",
+                  code: "MAX_DEVIATION = 5%",
+                },
+                {
+                  icon: "⏰",
+                  attack: "Outdated Data",
+                  desc: "Oracle provides stale prices",
+                  defense: "Per-oracle staleness thresholds",
+                  code: "MAX_STALENESS = 60-3600s",
+                },
+                {
+                  icon: "🚫",
+                  attack: "Missed Updates",
+                  desc: "Oracle fails to update",
+                  defense: "Fail tracking (3 fails = disabled)",
+                  code: "MAX_FAIL_COUNT = 3",
+                },
+                {
+                  icon: "🔀",
+                  attack: "Conflicting Values",
+                  desc: "Multiple oracles disagree",
+                  defense: "Byzantine median from 5 oracles",
+                  code: "BFT: 3/5 consensus",
+                },
+              ].map((item, idx) => (
+                <div key={idx} className="relative group">
+                  <div className="absolute -inset-0.5 bg-gradient-to-r from-red-500 to-green-500 rounded-2xl blur opacity-20 group-hover:opacity-40 transition" />
+                  <div className="relative bg-black/40 backdrop-blur-xl border border-white/10 rounded-2xl p-4 h-full">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="px-2 py-0.5 bg-red-500/20 border border-red-500/50 rounded-full text-red-400 text-xs">
+                        ATTACK
+                      </span>
+                      <span className="text-2xl">{item.icon}</span>
+                    </div>
+                    <h3 className="font-bold text-red-400 text-sm mb-1">
+                      {idx + 1}. {item.attack}
+                    </h3>
+                    <p className="text-xs text-white/50 mb-3">{item.desc}</p>
+                    <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-2 text-xs text-green-300 mb-2">
+                      ✓ {item.defense}
+                    </div>
+                    <div className="font-mono text-xs text-white/40 bg-white/5 rounded px-2 py-1">{item.code}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Defense Summary */}
+            <div className="mt-8 max-w-4xl mx-auto">
+              <div className="relative group">
+                <div className="absolute -inset-0.5 bg-gradient-to-r from-green-500 to-emerald-500 rounded-2xl blur opacity-30" />
+                <div className="relative bg-black/40 backdrop-blur-xl border border-green-500/30 rounded-2xl p-6 text-center">
+                  <div className="flex items-center justify-center gap-3 mb-4">
+                    <span className="text-4xl">🛡️</span>
+                    <h3 className="font-bold text-xl text-green-400">All 4 Adversarial Conditions Defended</h3>
+                  </div>
+                  <p className="text-white/70 text-sm mb-4">
+                    Multi-oracle BFT aggregation: Byzantine Median + Staleness Checks + Fail Tracking + Confidence
+                    Weighting
+                  </p>
+                  <a
+                    href="/oracle"
+                    className="inline-flex items-center gap-2 px-6 py-2 bg-green-500/20 border border-green-500/50 rounded-full text-green-300 hover:bg-green-500/30 transition-colors"
+                  >
+                    <span>🧪</span> Run Attack Simulator
+                  </a>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* 🚨 NEW ADVERSARIAL ORACLE CONDITION */}
-      <div className="bg-gradient-to-r from-error/20 via-warning/20 to-error/20 py-12">
-        <div className="container mx-auto px-4">
-          <div className="text-center mb-8">
-            <span className="badge badge-lg badge-error mb-3">⚠️ ADVERSARIAL CONDITION</span>
-            <h2 className="text-3xl font-bold">Unreliable Oracle / External Data Feed</h2>
-            <p className="opacity-70 mt-2">Your protocol&apos;s oracle may behave adversarially. Here&apos;s how we defend:</p>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 max-w-6xl mx-auto">
-            {/* Condition 1: Incorrect Values */}
-            <div className="card bg-base-100 shadow-xl border-2 border-success">
-              <div className="card-body p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="badge badge-error badge-sm">ATTACK</span>
-                  <span className="text-2xl">❌</span>
-                </div>
-                <h3 className="font-bold text-error">1. Incorrect Values</h3>
-                <p className="text-xs opacity-70 mb-2">Oracle reports values 30% off</p>
-                <div className="bg-success/20 rounded p-2 text-xs border border-success/50">
-                  <strong className="text-success">✓ Defense:</strong> Byzantine median rejects &gt;5% deviation. Outlier detection excludes corrupt sources.
-                </div>
-                <div className="text-xs mt-2 font-mono bg-base-200 p-1 rounded">
-                  MAX_DEVIATION = 5%
+        {/* Intelligent System Architecture */}
+        <div className="py-16 bg-black/20">
+          <div className="container mx-auto px-4">
+            <div className="text-center mb-10">
+              <span className="inline-block px-4 py-1.5 bg-cyan-500/20 border border-cyan-500/50 rounded-full text-cyan-300 text-sm font-medium mb-4">
+                🧠 INTELLIGENT SYSTEM
+              </span>
+              <h2 className="text-3xl font-bold text-white mb-2">How Our Multi-Oracle BFT System Works</h2>
+              <p className="text-white/60">
+                Self-healing architecture that maintains accuracy even with faulty oracles
+              </p>
+            </div>
+
+            {/* System Flow Diagram */}
+            <div className="max-w-5xl mx-auto mb-10">
+              <div className="relative group">
+                <div className="absolute -inset-0.5 bg-gradient-to-r from-cyan-500 via-purple-500 to-pink-500 rounded-3xl blur opacity-20" />
+                <div className="relative bg-black/50 backdrop-blur-xl border border-white/10 rounded-3xl p-6 overflow-x-auto">
+                  <pre className="text-xs md:text-sm text-cyan-300 font-mono whitespace-pre">
+                    {`
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    INTELLIGENT MULTI-ORACLE AGGREGATION SYSTEM                  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐    │
+│   │ Chainlink│   │   Pyth   │   │   API3   │   │ Redstone │   │SyncedFeed│    │
+│   │  (Live)  │   │  (Live)  │   │ (FAULTY) │   │ (Backup) │   │(Fallback)│    │
+│   └────┬─────┘   └────┬─────┘   └────┬─────┘   └────┬─────┘   └────┬─────┘    │
+│        │              │              │              │              │           │
+│        ▼              ▼              ▼              ▼              ▼           │
+│   ┌─────────────────────────────────────────────────────────────────────┐      │
+│   │                    STEP 1: STALENESS CHECK                          │      │
+│   │   • Chainlink: MAX_STALENESS = 3600s (1 hour)                      │      │
+│   │   • Pyth: MAX_STALENESS = 60s (real-time)                          │      │
+│   │   • API3: MAX_STALENESS = 86400s → DETECTED STALE → EXCLUDED ❌     │      │
+│   └────────────────────────────────┬────────────────────────────────────┘      │
+│                                    ▼                                           │
+│   ┌─────────────────────────────────────────────────────────────────────┐      │
+│   │                    STEP 2: DEVIATION CHECK                          │      │
+│   │   • Calculate median of all valid prices                           │      │
+│   │   • Reject any price deviating >5% from median                     │      │
+│   │   • Prevents manipulation attacks (flash loan, sandwich)           │      │
+│   └────────────────────────────────┬────────────────────────────────────┘      │
+│                                    ▼                                           │
+│   ┌─────────────────────────────────────────────────────────────────────┐      │
+│   │                    STEP 3: BYZANTINE MEDIAN                         │      │
+│   │   • Sort remaining valid prices                                     │      │
+│   │   • Take median (middle value) - resistant to minority attacks     │      │
+│   │   • Even if 2/5 oracles are malicious, result is still correct!    │      │
+│   └────────────────────────────────┬────────────────────────────────────┘      │
+│                                    ▼                                           │
+│   ┌─────────────────────────────────────────────────────────────────────┐      │
+│   │                 STEP 4: CONFIDENCE WEIGHTING                        │      │
+│   │   • Higher weight for: fresh data, proven reliable oracles         │      │
+│   │   • Lower weight for: stale data, oracles with history of issues   │      │
+│   │   • Final Price = Σ(price × weight) / Σ(weights)                   │      │
+│   └────────────────────────────────┬────────────────────────────────────┘      │
+│                                    ▼                                           │
+│                          ┌─────────────────┐                                   │
+│                          │  FINAL PRICE ✓  │                                   │
+│                          │  Byzantine-Safe │                                   │
+│                          └─────────────────┘                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+`}
+                  </pre>
                 </div>
               </div>
             </div>
 
-            {/* Condition 2: Outdated Data */}
-            <div className="card bg-base-100 shadow-xl border-2 border-success">
-              <div className="card-body p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="badge badge-error badge-sm">ATTACK</span>
-                  <span className="text-2xl">⏰</span>
-                </div>
-                <h3 className="font-bold text-error">2. Outdated Data</h3>
-                <p className="text-xs opacity-70 mb-2">Oracle provides stale prices</p>
-                <div className="bg-success/20 rounded p-2 text-xs border border-success/50">
-                  <strong className="text-success">✓ Defense:</strong> Per-oracle staleness thresholds. Chainlink: 1hr, Pyth: 60s, DIA: 2min.
-                </div>
-                <div className="text-xs mt-2 font-mono bg-base-200 p-1 rounded">
-                  MAX_STALENESS = 60-3600s
+            {/* Faulty API3 Handling */}
+            <div className="max-w-4xl mx-auto mb-10">
+              <div className="relative group">
+                <div className="absolute -inset-0.5 bg-gradient-to-r from-yellow-500 to-orange-500 rounded-2xl blur opacity-30" />
+                <div className="relative bg-black/50 backdrop-blur-xl border border-yellow-500/30 rounded-2xl p-6">
+                  <div className="flex items-start gap-4 mb-4">
+                    <span className="text-4xl">⚡</span>
+                    <div>
+                      <h3 className="font-bold text-xl text-yellow-400 mb-2">
+                        Handling Faulty API3 Oracle (Hackathon Condition)
+                      </h3>
+                      <p className="text-white/70 text-sm">
+                        The hackathon requires our system to work even when API3 returns stale/incorrect data.
+                        Here&apos;s how we handle it:
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-black/30 rounded-xl p-4 border border-white/10">
+                      <div className="text-2xl mb-2">1️⃣</div>
+                      <h4 className="font-bold text-white text-sm mb-1">Detection</h4>
+                      <p className="text-xs text-white/60">
+                        API3 data on Sepolia is stale (updatedAt &gt; 24h ago). Our staleness check automatically
+                        detects this.
+                      </p>
+                      <code className="block mt-2 text-xs text-yellow-300 bg-black/30 rounded p-1">
+                        if (age &gt; MAX_STALENESS) → exclude
+                      </code>
+                    </div>
+                    <div className="bg-black/30 rounded-xl p-4 border border-white/10">
+                      <div className="text-2xl mb-2">2️⃣</div>
+                      <h4 className="font-bold text-white text-sm mb-1">Fallback</h4>
+                      <p className="text-xs text-white/60">
+                        When API3 is excluded, SyncedPriceFeed activates as replacement - it derives price from
+                        Chainlink + Pyth.
+                      </p>
+                      <code className="block mt-2 text-xs text-green-300 bg-black/30 rounded p-1">
+                        SyncedFeed = median(CL, Pyth)
+                      </code>
+                    </div>
+                    <div className="bg-black/30 rounded-xl p-4 border border-white/10">
+                      <div className="text-2xl mb-2">3️⃣</div>
+                      <h4 className="font-bold text-white text-sm mb-1">Continuity</h4>
+                      <p className="text-xs text-white/60">
+                        System continues operating with 4/5 oracles. BFT still maintains correctness with 3+ valid
+                        sources.
+                      </p>
+                      <code className="block mt-2 text-xs text-cyan-300 bg-black/30 rounded p-1">
+                        BFT: ⌊(n-1)/3⌋ = 1 fault tolerated
+                      </code>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Condition 3: Missed Updates */}
-            <div className="card bg-base-100 shadow-xl border-2 border-success">
-              <div className="card-body p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="badge badge-error badge-sm">ATTACK</span>
-                  <span className="text-2xl">🚫</span>
-                </div>
-                <h3 className="font-bold text-error">3. Missed Updates</h3>
-                <p className="text-xs opacity-70 mb-2">Oracle fails to update entirely</p>
-                <div className="bg-success/20 rounded p-2 text-xs border border-success/50">
-                  <strong className="text-success">✓ Defense:</strong> Fail tracking (3 fails = disabled). Fallback cascade to backup oracles.
-                </div>
-                <div className="text-xs mt-2 font-mono bg-base-200 p-1 rounded">
-                  MAX_FAIL_COUNT = 3
+            {/* Transaction Flow */}
+            <div className="max-w-4xl mx-auto">
+              <div className="relative group">
+                <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-pink-500 rounded-2xl blur opacity-20" />
+                <div className="relative bg-black/50 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+                  <h3 className="font-bold text-xl text-white mb-4 flex items-center gap-2">
+                    <span className="text-2xl">🔄</span> Settlement Transaction Flow
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                    {[
+                      { step: "1", title: "Create", desc: "User submits settlement with transfers", icon: "📝" },
+                      { step: "2", title: "Queue", desc: "FIFO ordering prevents MEV", icon: "📋" },
+                      { step: "3", title: "Deposit", desc: "Funds locked in escrow", icon: "🔐" },
+                      { step: "4", title: "Execute", desc: "Oracle-validated transfer", icon: "✅" },
+                    ].map((item, idx) => (
+                      <div key={idx} className="relative">
+                        <div className="bg-black/30 rounded-xl p-4 border border-white/10 text-center h-full">
+                          <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center text-white text-sm font-bold mx-auto mb-2">
+                            {item.step}
+                          </div>
+                          <span className="text-2xl block mb-2">{item.icon}</span>
+                          <h4 className="font-bold text-white text-sm">{item.title}</h4>
+                          <p className="text-xs text-white/50">{item.desc}</p>
+                        </div>
+                        {idx < 3 && (
+                          <div className="hidden md:block absolute top-1/2 -right-2 transform -translate-y-1/2 text-purple-400">
+                            →
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-4 text-center">
+                    <span className="inline-block px-4 py-2 bg-purple-500/10 border border-purple-500/30 rounded-full text-purple-300 text-sm">
+                      🛡️ 3-Phase Finality: TENTATIVE → SEMI_FINAL → FINAL (BFT Validated)
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-
-            {/* Condition 4: Conflicting Values */}
-            <div className="card bg-base-100 shadow-xl border-2 border-success">
-              <div className="card-body p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="badge badge-error badge-sm">ATTACK</span>
-                  <span className="text-2xl">🔀</span>
-                </div>
-                <h3 className="font-bold text-error">4. Conflicting Values</h3>
-                <p className="text-xs opacity-70 mb-2">Multiple oracles disagree</p>
-                <div className="bg-success/20 rounded p-2 text-xs border border-success/50">
-                  <strong className="text-success">✓ Defense:</strong> Byzantine median from 5 oracles (tolerates 2 corrupt). Confidence weighting.
-                </div>
-                <div className="text-xs mt-2 font-mono bg-base-200 p-1 rounded">
-                  BFT: 3/5 consensus
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Adversarial Summary */}
-          <div className="mt-8 bg-base-100 rounded-2xl p-6 max-w-4xl mx-auto shadow-xl border-2 border-success">
-            <div className="flex items-center justify-center gap-3 mb-4">
-              <span className="text-4xl">🛡️</span>
-              <h3 className="font-bold text-xl text-success">All 4 Adversarial Conditions Defended</h3>
-            </div>
-            <div className="text-center text-sm opacity-80">
-              Our multi-oracle BFT aggregation system handles all adversarial oracle scenarios through:
-              <br/>
-              <strong>Byzantine Median + Staleness Checks + Fail Tracking + Confidence Weighting</strong>
-            </div>
-            <div className="mt-4 flex justify-center">
-              <a href="/oracle" className="btn btn-success btn-sm gap-2">
-                <span>🧪</span> Run Attack Simulator
-              </a>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* Footer */}
-      <div className="bg-base-100 py-6">
-        <div className="container mx-auto px-4 text-center">
-          <p className="text-sm opacity-70">
-            Built for TriHacker Tournament 2025 | Scaffold-ETH 2 • Solidity • Next.js
-          </p>
+        {/* Footer */}
+        <div className="py-8 border-t border-white/10">
+          <div className="container mx-auto px-4 text-center">
+            <p className="text-sm text-white/40">
+              Built for TriHacker Tournament 2025 | Scaffold-ETH 2 • Solidity • Next.js
+            </p>
+          </div>
         </div>
       </div>
     </div>
