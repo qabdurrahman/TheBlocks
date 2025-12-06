@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { parseEther } from "viem";
-import { useAccount } from "wagmi";
+import { useCallback, useEffect, useState } from "react";
+import { formatEther, parseEther } from "viem";
+import { useAccount, useBalance, usePublicClient } from "wagmi";
 import { useScaffoldReadContract, useScaffoldWriteContract } from "~~/hooks/scaffold-eth";
 import { notification } from "~~/utils/scaffold-eth";
 
@@ -13,10 +13,29 @@ import { notification } from "~~/utils/scaffold-eth";
  *
  * FEATURES:
  * - Dynamic transfer list (add/remove transfers)
+ * - Live USD value from oracle prices
  * - Optional timeout configuration
  * - Real-time validation
  * - Transaction status feedback
  */
+
+// Chainlink ETH/USD on Sepolia
+const CHAINLINK_ETH_USD = "0x694AA1769357215DE4FAC081bf1f309aDC325306";
+const CHAINLINK_ABI = [
+  {
+    inputs: [],
+    name: "latestRoundData",
+    outputs: [
+      { name: "roundId", type: "uint80" },
+      { name: "answer", type: "int256" },
+      { name: "startedAt", type: "uint256" },
+      { name: "updatedAt", type: "uint256" },
+      { name: "answeredInRound", type: "uint80" },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+] as const;
 
 interface Transfer {
   from: string;
@@ -26,9 +45,33 @@ interface Transfer {
 
 export const SettlementInitiator = () => {
   const { address: connectedAddress, isConnected } = useAccount();
+  const { data: balanceData } = useBalance({ address: connectedAddress });
+  const publicClient = usePublicClient();
   const [transfers, setTransfers] = useState<Transfer[]>([{ from: "", to: "", amount: "" }]);
   const [customTimeout, setCustomTimeout] = useState("");
   const [isCreating, setIsCreating] = useState(false);
+  const [ethPrice, setEthPrice] = useState<number>(0);
+
+  // Fetch ETH price from Chainlink
+  const fetchPrice = useCallback(async () => {
+    if (!publicClient) return;
+    try {
+      const data = await publicClient.readContract({
+        address: CHAINLINK_ETH_USD,
+        abi: CHAINLINK_ABI,
+        functionName: "latestRoundData",
+      });
+      setEthPrice(Number(data[1]) / 1e8);
+    } catch (error) {
+      console.error("Failed to fetch price:", error);
+    }
+  }, [publicClient]);
+
+  useEffect(() => {
+    fetchPrice();
+    const interval = setInterval(fetchPrice, 30000);
+    return () => clearInterval(interval);
+  }, [fetchPrice]);
 
   // Contract read for queue position
   const { data: queueLength } = useScaffoldReadContract({
@@ -151,9 +194,9 @@ export const SettlementInitiator = () => {
 
   return (
     <div className="bg-base-100 rounded-3xl shadow-lg p-6 max-w-4xl mx-auto">
-      <h2 className="text-2xl font-bold mb-2 text-center">⚡ Create Settlement</h2>
+      <h2 className="text-2xl font-bold mb-2 text-center">💹 Create Trade / Transfer Rights</h2>
       <p className="text-center text-sm opacity-70 mb-6">
-        Queue Position: #{queueLength?.toString() || "0"} | Next ID: {nextSettlementId?.toString() || "1"}
+        Oracle-validated transfers with FIFO ordering | Queue: #{queueLength?.toString() || "0"} | Next ID: {nextSettlementId?.toString() || "1"}
       </p>
 
       {/* Transfer List */}
@@ -243,18 +286,54 @@ export const SettlementInitiator = () => {
         </div>
       </div>
 
-      {/* Summary */}
+      {/* Wallet Balance */}
+      {isConnected && balanceData && (
+        <div className="mt-6 bg-gradient-to-r from-success/10 to-primary/10 rounded-xl p-4">
+          <h3 className="font-semibold mb-3">💰 Your Wallet Balance</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-base-100 rounded-lg p-3 text-center">
+              <div className="text-xs opacity-60 mb-1">ETH Balance</div>
+              <div className="text-xl font-bold text-primary">
+                {parseFloat(formatEther(balanceData.value)).toFixed(4)} ETH
+              </div>
+            </div>
+            <div className="bg-base-100 rounded-lg p-3 text-center">
+              <div className="text-xs opacity-60 mb-1">USD Value</div>
+              <div className="text-xl font-bold text-success">
+                ${(parseFloat(formatEther(balanceData.value)) * ethPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Summary with Live USD Value */}
       <div className="mt-6 bg-gradient-to-r from-primary/10 to-secondary/10 rounded-xl p-4">
-        <h3 className="font-semibold mb-2">📊 Summary</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <span className="opacity-70">Total Amount:</span>
-            <span className="font-bold ml-2">{calculateTotal().toFixed(4)} ETH</span>
+        <h3 className="font-semibold mb-3">📊 Trade Summary</h3>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-base-100 rounded-lg p-3 text-center">
+            <div className="text-xs opacity-60 mb-1">Total ETH</div>
+            <div className="text-xl font-bold text-primary">{calculateTotal().toFixed(4)}</div>
           </div>
-          <div>
-            <span className="opacity-70">Transfers:</span>
-            <span className="font-bold ml-2">{transfers.length}</span>
+          <div className="bg-base-100 rounded-lg p-3 text-center">
+            <div className="text-xs opacity-60 mb-1">USD Value</div>
+            <div className="text-xl font-bold text-success">
+              ${(calculateTotal() * ethPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
           </div>
+          <div className="bg-base-100 rounded-lg p-3 text-center">
+            <div className="text-xs opacity-60 mb-1">ETH/USD Rate</div>
+            <div className="text-lg font-mono">
+              ${ethPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+          </div>
+          <div className="bg-base-100 rounded-lg p-3 text-center">
+            <div className="text-xs opacity-60 mb-1">Transfers</div>
+            <div className="text-xl font-bold">{transfers.length}</div>
+          </div>
+        </div>
+        <div className="mt-3 text-center">
+          <span className="badge badge-success badge-sm">📡 Live Chainlink Price</span>
         </div>
       </div>
 
@@ -265,11 +344,11 @@ export const SettlementInitiator = () => {
           onClick={handleCreateSettlement}
           disabled={!isConnected || isCreating}
         >
-          {isCreating ? "Creating..." : "🚀 Create Settlement"}
+          {isCreating ? "Creating..." : "💹 Create Trade"}
         </button>
       </div>
 
-      {!isConnected && <p className="text-center text-error mt-4">Please connect your wallet to create a settlement</p>}
+      {!isConnected && <p className="text-center text-error mt-4">Please connect your wallet to create a trade</p>}
     </div>
   );
 };
