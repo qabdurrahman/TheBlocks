@@ -12,8 +12,6 @@ import {
   PYTH_ABI,
   SMART_ORACLE_SELECTOR_ABI,
   GUARDIAN_ORACLE_V2_ABI,
-  API3_ADAPTER_ABI,
-  SYNCED_PRICE_FEED_ABI,
   type ChainlinkFeedKey,
   type PythFeedKey,
 } from "~~/config/priceFeeds";
@@ -83,7 +81,7 @@ interface SmartSelectorContractData {
 export function ThreeOracleDashboard() {
   const [oracles, setOracles] = useState<OracleData[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
+  const [, setLastUpdate] = useState<Date | null>(null);
   const [selectedUseCase, setSelectedUseCase] = useState<string>("BALANCED");
   const [smartSelection, setSmartSelection] = useState<SmartSelectionResult | null>(null);
   const [guardianStatus, setGuardianStatus] = useState<GuardianStatus | null>(null);

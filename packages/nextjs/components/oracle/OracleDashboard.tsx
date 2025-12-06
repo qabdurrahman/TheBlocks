@@ -107,7 +107,7 @@ export function OracleDashboard() {
           timestamp: updatedAt,
           status: age < 3600 ? "live" : age < 7200 ? "stale" : "error",
         });
-      } catch (e) {
+      } catch {
         newPrices.push({
           pair,
           price: 0,
@@ -140,7 +140,7 @@ export function OracleDashboard() {
           confidence: conf,
           status: age < 300 ? "live" : age < 600 ? "stale" : "error",
         });
-      } catch (e) {
+      } catch {
         // Pyth might fail if no update
       }
     }

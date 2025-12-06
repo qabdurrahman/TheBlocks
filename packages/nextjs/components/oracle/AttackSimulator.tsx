@@ -12,11 +12,14 @@ const sepoliaClient = createPublicClient({
 
 const ATTACK_SIMULATOR = "0x5FFFeAf6B0b4d1685809959cA4B16E374827a8e2";
 // Guardian contract address for reference (used by AttackSimulator contract)
-const _GUARDIAN = "0x71027655D76832eA3d1F056C528485ddE1aec66a";
+// const _GUARDIAN = "0x71027655D76832eA3d1F056C528485ddE1aec66a";
 
 const ATTACK_SIMULATOR_ABI = [
   {
-    inputs: [{ name: "maliciousPrice", type: "int256" }, { name: "asset", type: "string" }],
+    inputs: [
+      { name: "maliciousPrice", type: "int256" },
+      { name: "asset", type: "string" },
+    ],
     name: "simulateFlashLoanAttack",
     outputs: [
       { name: "attackBlocked", type: "bool" },
@@ -64,28 +67,64 @@ interface AttackResult {
 // The protocol's external data feed (oracle) may behave adversarially:
 // 1) Report values that are incorrect by up to 30%
 // 2) Provide outdated data
-// 3) Miss updates entirely  
+// 3) Miss updates entirely
 // 4) Provide conflicting values if using multiple oracles
 // =====================================================
 
 const ATTACK_SCENARIOS = [
   // Condition 1: Values incorrect by up to 30%
-  { name: "30% Price Error", type: "incorrect30", icon: "❌", description: "Oracle reports 30% incorrect value", color: "red", condition: 1 },
-  { name: "Flash Loan Attack", type: "flashloan", icon: "⚡", description: "50% price manipulation via flash loan", color: "red", condition: 1 },
+  {
+    name: "30% Price Error",
+    type: "incorrect30",
+    icon: "❌",
+    description: "Oracle reports 30% incorrect value",
+    color: "red",
+    condition: 1,
+  },
+  {
+    name: "Flash Loan Attack",
+    type: "flashloan",
+    icon: "⚡",
+    description: "50% price manipulation via flash loan",
+    color: "red",
+    condition: 1,
+  },
   // Condition 2: Outdated data
-  { name: "Stale Data", type: "stale", icon: "⏰", description: "Oracle provides 2+ minute old data", color: "orange", condition: 2 },
+  {
+    name: "Stale Data",
+    type: "stale",
+    icon: "⏰",
+    description: "Oracle provides 2+ minute old data",
+    color: "orange",
+    condition: 2,
+  },
   // Condition 3: Missed updates
-  { name: "Missed Update", type: "missed", icon: "🚫", description: "Oracle fails to update entirely", color: "yellow", condition: 3 },
+  {
+    name: "Missed Update",
+    type: "missed",
+    icon: "🚫",
+    description: "Oracle fails to update entirely",
+    color: "yellow",
+    condition: 3,
+  },
   // Condition 4: Conflicting values from multiple oracles
-  { name: "Oracle Conflict", type: "conflict", icon: "🔀", description: "Oracles disagree by 15%+", color: "purple", condition: 4 },
+  {
+    name: "Oracle Conflict",
+    type: "conflict",
+    icon: "🔀",
+    description: "Oracles disagree by 15%+",
+    color: "purple",
+    condition: 4,
+  },
 ];
 
-const ADVERSARIAL_CONDITIONS = [
-  { id: 1, name: "Incorrect Values (up to 30%)", defense: "Byzantine median + 5% deviation threshold + outlier detection" },
-  { id: 2, name: "Outdated Data", defense: "Per-oracle staleness thresholds (60s-3600s)" },
-  { id: 3, name: "Missed Updates", defense: "Fail tracking (3 fails = disabled) + fallback cascade" },
-  { id: 4, name: "Conflicting Values", defense: "Byzantine median from 5 oracles + confidence weighting" },
-];
+// Adversarial conditions reference (documentation only)
+// const ADVERSARIAL_CONDITIONS = [
+//   { id: 1, name: "Incorrect Values (up to 30%)", defense: "Byzantine median + 5% deviation threshold + outlier detection" },
+//   { id: 2, name: "Outdated Data", defense: "Per-oracle staleness thresholds (60s-3600s)" },
+//   { id: 3, name: "Missed Updates", defense: "Fail tracking (3 fails = disabled) + fallback cascade" },
+//   { id: 4, name: "Conflicting Values", defense: "Byzantine median from 5 oracles + confidence weighting" },
+// ];
 
 export function AttackSimulator() {
   const [results, setResults] = useState<AttackResult[]>([]);
@@ -98,15 +137,16 @@ export function AttackSimulator() {
     setCurrentAttack(attackType);
     const basePrice = 2500; // Approximate ETH price
     const maliciousPrice = Math.floor(basePrice * maliciousPriceMultiplier);
-    
+
     // Map attack types to adversarial conditions
     const conditionMap: Record<string, number> = {
-      'incorrect30': 1, 'flashloan': 1,
-      'stale': 2,
-      'missed': 3,
-      'conflict': 4,
+      incorrect30: 1,
+      flashloan: 1,
+      stale: 2,
+      missed: 3,
+      conflict: 4,
     };
-    
+
     try {
       const data = await sepoliaClient.readContract({
         address: ATTACK_SIMULATOR as `0x${string}`,
@@ -114,7 +154,7 @@ export function AttackSimulator() {
         functionName: "simulateFlashLoanAttack",
         args: [BigInt(maliciousPrice * 1e8), selectedAsset],
       });
-      
+
       const result: AttackResult = {
         type: attackType,
         blocked: data[0],
@@ -124,7 +164,7 @@ export function AttackSimulator() {
         timestamp: new Date(),
         condition: conditionMap[attackType] || 0,
       };
-      
+
       setResults(prev => [result, ...prev].slice(0, 10));
     } catch (e: any) {
       console.error("Attack simulation failed:", e);
@@ -140,24 +180,29 @@ export function AttackSimulator() {
       };
       setResults(prev => [result, ...prev].slice(0, 10));
     }
-    
+
     setCurrentAttack(null);
   };
-  
+
   const getConditionDefense = (condition: number): string => {
-    switch(condition) {
-      case 1: return "Byzantine median rejected 30% deviation (>5% threshold)";
-      case 2: return "Staleness check rejected outdated data (>60s old)";
-      case 3: return "Fallback cascade activated after oracle failure";
-      case 4: return "Median consensus resolved conflicting oracle values";
-      default: return "Contract protection triggered";
+    switch (condition) {
+      case 1:
+        return "Byzantine median rejected 30% deviation (>5% threshold)";
+      case 2:
+        return "Staleness check rejected outdated data (>60s old)";
+      case 3:
+        return "Fallback cascade activated after oracle failure";
+      case 4:
+        return "Median consensus resolved conflicting oracle values";
+      default:
+        return "Contract protection triggered";
     }
   };
 
   const runComprehensiveTest = async () => {
     setIsRunning(true);
     setResults([]);
-    
+
     try {
       const data = await sepoliaClient.readContract({
         address: ATTACK_SIMULATOR as `0x${string}`,
@@ -165,7 +210,7 @@ export function AttackSimulator() {
         functionName: "runComprehensiveTest",
         args: [selectedAsset],
       });
-      
+
       setComprehensiveResults({
         attacksAttempted: Number(data.attacksAttempted),
         attacksBlocked: Number(data.attacksBlocked),
@@ -188,7 +233,7 @@ export function AttackSimulator() {
         normalPriceAccepted: true,
       });
     }
-    
+
     // Run individual attacks for visual effect - covering all 4 adversarial conditions
     const attacks = [
       // Condition 1: Incorrect values (up to 30%)
@@ -201,12 +246,12 @@ export function AttackSimulator() {
       // Condition 4: Conflicting values
       { type: "conflict", multiplier: 1.15 },
     ];
-    
+
     for (const attack of attacks) {
       await runAttack(attack.type, attack.multiplier);
       await new Promise(r => setTimeout(r, 800));
     }
-    
+
     setIsRunning(false);
   };
 
@@ -224,22 +269,20 @@ export function AttackSimulator() {
               <h3 className="font-bold text-xl flex items-center gap-2">
                 <span>⚔️</span> Attack Simulation Engine
               </h3>
-              <p className="text-gray-400 text-sm mt-1">
-                Test the oracle security with simulated attack vectors
-              </p>
+              <p className="text-gray-400 text-sm mt-1">Test the oracle security with simulated attack vectors</p>
             </div>
-            
+
             <div className="flex items-center gap-3">
               <select
                 value={selectedAsset}
-                onChange={(e) => setSelectedAsset(e.target.value)}
+                onChange={e => setSelectedAsset(e.target.value)}
                 className="bg-white/10 border border-white/20 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
               >
                 <option value="ETH/USD">ETH/USD</option>
                 <option value="BTC/USD">BTC/USD</option>
                 <option value="LINK/USD">LINK/USD</option>
               </select>
-              
+
               <button
                 onClick={runComprehensiveTest}
                 disabled={isRunning}
@@ -253,15 +296,25 @@ export function AttackSimulator() {
                   {isRunning ? (
                     <>
                       <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                          fill="none"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
                       </svg>
                       Running...
                     </>
                   ) : (
-                    <>
-                      🚀 Launch Full Test
-                    </>
+                    <>🚀 Launch Full Test</>
                   )}
                 </span>
               </button>
@@ -276,7 +329,7 @@ export function AttackSimulator() {
                 onClick={() => runAttack(attack.type, attack.type === "crash" ? 0.7 : 1.5)}
                 disabled={isRunning}
                 className={`relative p-4 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all duration-300 text-left group/attack disabled:opacity-50 ${
-                  currentAttack === attack.type ? 'ring-2 ring-red-500 bg-red-500/20' : ''
+                  currentAttack === attack.type ? "ring-2 ring-red-500 bg-red-500/20" : ""
                 }`}
               >
                 <span className="text-2xl mb-2 block">{attack.icon}</span>
@@ -297,7 +350,9 @@ export function AttackSimulator() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-gradient-to-br from-green-500/20 to-emerald-500/20 border border-green-500/30 rounded-2xl p-5 backdrop-blur-xl">
           <p className="text-gray-400 text-sm">Attacks Blocked</p>
-          <p className="text-3xl font-bold text-green-400">{blockedCount}/{results.length}</p>
+          <p className="text-3xl font-bold text-green-400">
+            {blockedCount}/{results.length}
+          </p>
         </div>
         <div className="bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 rounded-2xl p-5 backdrop-blur-xl">
           <p className="text-gray-400 text-sm">Defense Rate</p>
@@ -321,7 +376,7 @@ export function AttackSimulator() {
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
               <span>📊</span> Hackathon Adversarial Condition Results
             </h3>
-            
+
             {/* 4 Adversarial Conditions Grid */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-xl text-center">
@@ -349,46 +404,24 @@ export function AttackSimulator() {
                 <p className="text-green-400 text-xs mt-1">✅ DEFENDED</p>
               </div>
             </div>
-            
+
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <TestResultBadge
-                label="Flash Loan"
-                passed={comprehensiveResults.flashLoanBlocked}
-                icon="⚡"
-              />
-              <TestResultBadge
-                label="Manipulation"
-                passed={comprehensiveResults.manipulationBlocked}
-                icon="🔨"
-              />
-              <TestResultBadge
-                label="Price Spike"
-                passed={comprehensiveResults.spikeBlocked}
-                icon="📈"
-              />
-              <TestResultBadge
-                label="Stale Price"
-                passed={comprehensiveResults.stalePriceHandled}
-                icon="⏰"
-              />
-              <TestResultBadge
-                label="Normal Price"
-                passed={comprehensiveResults.normalPriceAccepted}
-                icon="✅"
-              />
+              <TestResultBadge label="Flash Loan" passed={comprehensiveResults.flashLoanBlocked} icon="⚡" />
+              <TestResultBadge label="Manipulation" passed={comprehensiveResults.manipulationBlocked} icon="🔨" />
+              <TestResultBadge label="Price Spike" passed={comprehensiveResults.spikeBlocked} icon="📈" />
+              <TestResultBadge label="Stale Price" passed={comprehensiveResults.stalePriceHandled} icon="⏰" />
+              <TestResultBadge label="Normal Price" passed={comprehensiveResults.normalPriceAccepted} icon="✅" />
             </div>
-            
+
             <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-xl">
               <div className="flex items-center justify-between">
                 <span className="text-green-300 font-medium">🛡️ Adversarial Defense Score</span>
-                <span className="text-2xl font-bold text-green-400">
-                  4/4 Conditions Defended
-                </span>
+                <span className="text-2xl font-bold text-green-400">4/4 Conditions Defended</span>
               </div>
               <div className="mt-2 h-2 bg-gray-700 rounded-full overflow-hidden">
-                <div 
+                <div
                   className="h-full bg-gradient-to-r from-green-500 to-emerald-500 transition-all duration-1000"
-                  style={{ width: '100%' }}
+                  style={{ width: "100%" }}
                 />
               </div>
             </div>
@@ -404,31 +437,32 @@ export function AttackSimulator() {
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
               <span>📜</span> Attack Log
             </h3>
-            
+
             <div className="space-y-3 max-h-80 overflow-y-auto">
               {results.map((result, idx) => (
                 <div
                   key={idx}
                   className={`p-4 rounded-xl border ${
-                    result.blocked
-                      ? 'bg-green-500/10 border-green-500/30'
-                      : 'bg-red-500/10 border-red-500/30'
+                    result.blocked ? "bg-green-500/10 border-green-500/30" : "bg-red-500/10 border-red-500/30"
                   } animate-fade-in`}
                 >
                   <div className="flex items-start justify-between">
                     <div>
-                      <span className={`font-medium ${result.blocked ? 'text-green-400' : 'text-red-400'}`}>
-                        {result.blocked ? '✅ BLOCKED' : '❌ PASSED'}
+                      <span className={`font-medium ${result.blocked ? "text-green-400" : "text-red-400"}`}>
+                        {result.blocked ? "✅ BLOCKED" : "❌ PASSED"}
                       </span>
                       <span className="text-gray-400 ml-2 capitalize">{result.type}</span>
                     </div>
-                    <span className="text-xs text-gray-500">
-                      {result.timestamp.toLocaleTimeString()}
-                    </span>
+                    <span className="text-xs text-gray-500">{result.timestamp.toLocaleTimeString()}</span>
                   </div>
                   <div className="mt-2 text-sm text-gray-400">
-                    <p>Attempted: <span className="text-white font-mono">${result.attemptedPrice.toLocaleString()}</span></p>
-                    <p>Protected: <span className="text-green-400 font-mono">${result.protectedPrice.toLocaleString()}</span></p>
+                    <p>
+                      Attempted: <span className="text-white font-mono">${result.attemptedPrice.toLocaleString()}</span>
+                    </p>
+                    <p>
+                      Protected:{" "}
+                      <span className="text-green-400 font-mono">${result.protectedPrice.toLocaleString()}</span>
+                    </p>
                     <p className="text-xs mt-1 text-gray-500">{result.reason}</p>
                   </div>
                 </div>
@@ -443,14 +477,14 @@ export function AttackSimulator() {
 
 function TestResultBadge({ label, passed, icon }: { label: string; passed: boolean; icon: string }) {
   return (
-    <div className={`p-4 rounded-xl text-center ${
-      passed ? 'bg-green-500/20 border border-green-500/30' : 'bg-red-500/20 border border-red-500/30'
-    }`}>
+    <div
+      className={`p-4 rounded-xl text-center ${
+        passed ? "bg-green-500/20 border border-green-500/30" : "bg-red-500/20 border border-red-500/30"
+      }`}
+    >
       <span className="text-2xl">{icon}</span>
       <p className="text-sm font-medium mt-2">{label}</p>
-      <p className={`text-xs ${passed ? 'text-green-400' : 'text-red-400'}`}>
-        {passed ? 'Protected' : 'Vulnerable'}
-      </p>
+      <p className={`text-xs ${passed ? "text-green-400" : "text-red-400"}`}>{passed ? "Protected" : "Vulnerable"}</p>
     </div>
   );
 }

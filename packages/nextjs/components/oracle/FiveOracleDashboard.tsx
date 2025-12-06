@@ -168,7 +168,7 @@ export function FiveOracleDashboard() {
         color: "blue",
         specialty: "Industry Standard • High Reliability",
       });
-    } catch (e) {
+    } catch {
       oracleData.push({
         name: "Chainlink",
         type: "push",
@@ -211,7 +211,7 @@ export function FiveOracleDashboard() {
         color: "purple",
         specialty: "Sub-second Updates • Trading",
       });
-    } catch (e) {
+    } catch {
       oracleData.push({
         name: "Pyth Network",
         type: "pull",
@@ -251,7 +251,7 @@ export function FiveOracleDashboard() {
         color: "pink",
         specialty: "Community Sourced • 100+ Assets",
       });
-    } catch (e) {
+    } catch {
       oracleData.push({
         name: "DIA Oracle",
         type: "community",
@@ -300,7 +300,7 @@ export function FiveOracleDashboard() {
         color: "cyan",
         specialty: "Manipulation Resistant • On-Chain",
       });
-    } catch (e) {
+    } catch {
       oracleData.push({
         name: "Uniswap TWAP",
         type: "twap",
@@ -336,6 +336,7 @@ export function FiveOracleDashboard() {
 
     // Calculate smart selection (simulated without deployed contract)
     calculateSmartSelection(oracleData);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const calculateSmartSelection = (oracleData: OracleData[]) => {
