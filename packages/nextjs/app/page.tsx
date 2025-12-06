@@ -397,6 +397,109 @@ const Home: NextPage = () => {
         </div>
       </div>
 
+      {/* 🚨 NEW ADVERSARIAL ORACLE CONDITION */}
+      <div className="bg-gradient-to-r from-error/20 via-warning/20 to-error/20 py-12">
+        <div className="container mx-auto px-4">
+          <div className="text-center mb-8">
+            <span className="badge badge-lg badge-error mb-3">⚠️ ADVERSARIAL CONDITION</span>
+            <h2 className="text-3xl font-bold">Unreliable Oracle / External Data Feed</h2>
+            <p className="opacity-70 mt-2">Your protocol&apos;s oracle may behave adversarially. Here&apos;s how we defend:</p>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 max-w-6xl mx-auto">
+            {/* Condition 1: Incorrect Values */}
+            <div className="card bg-base-100 shadow-xl border-2 border-success">
+              <div className="card-body p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="badge badge-error badge-sm">ATTACK</span>
+                  <span className="text-2xl">❌</span>
+                </div>
+                <h3 className="font-bold text-error">1. Incorrect Values</h3>
+                <p className="text-xs opacity-70 mb-2">Oracle reports values 30% off</p>
+                <div className="bg-success/20 rounded p-2 text-xs border border-success/50">
+                  <strong className="text-success">✓ Defense:</strong> Byzantine median rejects &gt;5% deviation. Outlier detection excludes corrupt sources.
+                </div>
+                <div className="text-xs mt-2 font-mono bg-base-200 p-1 rounded">
+                  MAX_DEVIATION = 5%
+                </div>
+              </div>
+            </div>
+
+            {/* Condition 2: Outdated Data */}
+            <div className="card bg-base-100 shadow-xl border-2 border-success">
+              <div className="card-body p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="badge badge-error badge-sm">ATTACK</span>
+                  <span className="text-2xl">⏰</span>
+                </div>
+                <h3 className="font-bold text-error">2. Outdated Data</h3>
+                <p className="text-xs opacity-70 mb-2">Oracle provides stale prices</p>
+                <div className="bg-success/20 rounded p-2 text-xs border border-success/50">
+                  <strong className="text-success">✓ Defense:</strong> Per-oracle staleness thresholds. Chainlink: 1hr, Pyth: 60s, DIA: 2min.
+                </div>
+                <div className="text-xs mt-2 font-mono bg-base-200 p-1 rounded">
+                  MAX_STALENESS = 60-3600s
+                </div>
+              </div>
+            </div>
+
+            {/* Condition 3: Missed Updates */}
+            <div className="card bg-base-100 shadow-xl border-2 border-success">
+              <div className="card-body p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="badge badge-error badge-sm">ATTACK</span>
+                  <span className="text-2xl">🚫</span>
+                </div>
+                <h3 className="font-bold text-error">3. Missed Updates</h3>
+                <p className="text-xs opacity-70 mb-2">Oracle fails to update entirely</p>
+                <div className="bg-success/20 rounded p-2 text-xs border border-success/50">
+                  <strong className="text-success">✓ Defense:</strong> Fail tracking (3 fails = disabled). Fallback cascade to backup oracles.
+                </div>
+                <div className="text-xs mt-2 font-mono bg-base-200 p-1 rounded">
+                  MAX_FAIL_COUNT = 3
+                </div>
+              </div>
+            </div>
+
+            {/* Condition 4: Conflicting Values */}
+            <div className="card bg-base-100 shadow-xl border-2 border-success">
+              <div className="card-body p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="badge badge-error badge-sm">ATTACK</span>
+                  <span className="text-2xl">🔀</span>
+                </div>
+                <h3 className="font-bold text-error">4. Conflicting Values</h3>
+                <p className="text-xs opacity-70 mb-2">Multiple oracles disagree</p>
+                <div className="bg-success/20 rounded p-2 text-xs border border-success/50">
+                  <strong className="text-success">✓ Defense:</strong> Byzantine median from 5 oracles (tolerates 2 corrupt). Confidence weighting.
+                </div>
+                <div className="text-xs mt-2 font-mono bg-base-200 p-1 rounded">
+                  BFT: 3/5 consensus
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Adversarial Summary */}
+          <div className="mt-8 bg-base-100 rounded-2xl p-6 max-w-4xl mx-auto shadow-xl border-2 border-success">
+            <div className="flex items-center justify-center gap-3 mb-4">
+              <span className="text-4xl">🛡️</span>
+              <h3 className="font-bold text-xl text-success">All 4 Adversarial Conditions Defended</h3>
+            </div>
+            <div className="text-center text-sm opacity-80">
+              Our multi-oracle BFT aggregation system handles all adversarial oracle scenarios through:
+              <br/>
+              <strong>Byzantine Median + Staleness Checks + Fail Tracking + Confidence Weighting</strong>
+            </div>
+            <div className="mt-4 flex justify-center">
+              <a href="/oracle" className="btn btn-success btn-sm gap-2">
+                <span>🧪</span> Run Attack Simulator
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Footer */}
       <div className="bg-base-100 py-6">
         <div className="container mx-auto px-4 text-center">
